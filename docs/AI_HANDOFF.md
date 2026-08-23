@@ -150,6 +150,59 @@ Current status. Overwrite/update this file at the end of every session or phase 
     this escape hatch is for test cleanup only, application code must never use it.
   - **Verified live**: a real Inspector demo login listed the template and fetched its full
     102-question structure over actual HTTP, not just through pytest.
+- **Phase 8 (Inspection Engine) complete** — the biggest phase so far, per scope Prompt 8.
+  Deliberately excludes photos/videos (Phase 9), creating a maintenance issue or risk
+  assessment from a response (Phases 10/13 — those modules don't exist yet), and any
+  "Scheduled"/"Cancelled" status transitions (no endpoint requests them in Prompt 8's own
+  action list) — noted explicitly in `app/api/inspections.py`'s module docstring.
+  - `app/models/inspection.py`, `inspection_response.py` — added to `models/__init__.py` and
+    sanity-queried against real data before any route was written (now a standing habit, not a
+    one-off). `Inspection.responses` and both template relationships carry `order_by=...` at
+    the model level; `InspectionResponse` ordering relies on `InspectionResponseId` (creation
+    order), since responses are batch-inserted in template `SortOrder` at start time and
+    `SortOrder` itself is deliberately *not* one of the frozen snapshot columns — reordering the
+    live template later must never reshuffle an already-started inspection's response order,
+    which a live join would risk.
+  - `app/services/inspection_service.py` — the actual engine: `start_inspection` resolves and
+    isolation-checks the property/template (reusing `property_service`/
+    `inspection_template_service`, not reimplementing the check), self-assigns
+    `InspectorUserId` to the current user (no "assign to someone else" flow exists),
+    batch-creates one frozen `InspectionResponse` per active question. `calculate_completion_percentage`
+    counts a response as done if answered (non-empty `AnswerText`) or marked N/A.
+    `update_response` validates `YesNo`/`PassFail` answers strictly against a fixed set (a typo
+    there is meaningless, not a matter of taste) and keeps `AnswerText` in sync when
+    `AnswerNumber`/`AnswerDate` is what was actually sent. `submit_inspection` checks mandatory
+    questions against the **live** `InspectionQuestion.IsMandatory` (a deliberate, documented
+    exception to "always use the snapshot" — a validation *rule* reasonably applies as currently
+    configured, unlike response *content*, which must stay historically frozen).
+  - **A narrower authorization rule than every other module so far**: only the inspection's own
+    assigned inspector, or an Administrator/Manager, can answer questions or submit — a plain
+    Inspector role at the company is *not* enough, unlike Properties/Templates' "any company
+    member can view, Admin/Manager can mutate." Documented explicitly in
+    `inspection_service._ensure_can_edit` as a deliberate departure, since an in-progress
+    inspection is one specific person's active work, not shared company data. Verified with a
+    real second-inspector test (403) and a real manager-override test (200).
+  - **Immutability after submission is enforced at the service layer, not the DB** (unlike
+    `InspectionTemplates`' real trigger) — `update_response`/`submit_inspection` both check
+    `Status == "Submitted"` and reject with 409. Verified: editing a response after submit
+    returns 409; submitting twice returns 409 (this is also literally the "duplicate submission"
+    edge case scope's Prompt 19 testing checklist calls out — covered here, ahead of Phase 18).
+  - `GET/POST /api/inspections`, `GET /api/inspections/{id}`,
+    `PATCH /api/inspections/{id}/responses/{id}`, `POST /api/inspections/{id}/submit`. No
+    separate "resume" endpoint — resuming is just re-fetching an in-progress inspection, since
+    every answer saves immediately (no draft/staging state exists).
+  - 14 new tests (51 total): snapshot creation in correct order/count, cross-company 404 on
+    start and on get, role-gated start (Maintenance blocked), answer validation (bad `YesNo`
+    value rejected, `AnswerNumber` correctly normalizes `AnswerText`), the
+    assigned-inspector-only rule (both the 403 and the manager-override 200), completion
+    percentage math verified against an exact expected value (not just "some percentage
+    changed"), mandatory-question submit gating, duplicate-submission 409, post-submission
+    immutability 409.
+  - **Verified live**: a real Inspector login → real property → real template → started a real
+    inspection (21 sections, 102 responses) → answered one question → confirmed completion moved
+    to exactly 1.0% → attempted submit and got back the correct "12 mandatory questions remain"
+    message (13 total mandatory minus the one just answered) — all over actual HTTP against the
+    real seeded data, then cleaned up.
 
 ## Currently being worked on
 
@@ -201,31 +254,34 @@ now with 6 real, working demo logins (see Phase 5 above) — password `Password1
 
 ## Coding standards
 
-Established and followed through Phase 7: routes thin, business logic lives in `app/services/`,
+Established and followed through Phase 8: routes thin, business logic lives in `app/services/`
+(reuse other services' already-authorized lookups instead of reimplementing isolation checks —
+`inspection_service.start_inspection` calls `property_service.get_property`/
+`inspection_template_service.get_template` rather than querying those tables directly),
 repositories do DB access only (join through the right parent table when a tenant table has no
-`CompanyId` of its own, like `Units`; use the `CompanyId IS NULL OR CompanyId = @x` pattern for
-global-default-plus-override tables like `InspectionTemplates`/`RiskMatrixLevels`),
-`app/schemas/` owns response shapes and input validation (enums mirroring DB `CHECK`
-constraints), `app/core/exceptions.py` owns error-to-HTTP-status mapping, `app/security/roles.py`
-centralizes role-name constants. Every new SQLAlchemy model must be added to
-`app/models/__init__.py` **and sanity-queried against the real DB before writing any route that
-depends on it** (Phase 7 did this proactively and caught nothing wrong — the point is doing the
-check, not that it always finds a bug). Every new Pydantic enum field must have its enum type
-imported under an alias if the field name matches the type name (Python 3.14 lazy-annotation
-gotcha). Test cleanup for a soft-delete-only table (anything with an `INSTEAD OF DELETE`
-trigger) must disable/delete/re-enable the trigger, then verify it's back to `is_disabled = 0`
-before the test ends — never leave a data-protection trigger disabled. Python 3.14, dependencies
-pinned with `>=` floors in `requirements.txt` — see `backend/README.md`.
+`CompanyId` of its own; use `CompanyId IS NULL OR CompanyId = @x` for global-default-plus-override
+tables), `app/schemas/` owns response shapes and input validation, `app/core/exceptions.py` owns
+error-to-HTTP-status mapping, `app/security/roles.py` centralizes role-name constants. Every new
+SQLAlchemy model must be added to `app/models/__init__.py` **and sanity-queried against the real
+DB before writing any route that depends on it**. Every new Pydantic enum field needs its enum
+type imported under an alias if the field name matches the type name (Python 3.14 lazy-annotation
+gotcha). Test cleanup for a soft-delete-only table must disable/delete/re-enable its trigger and
+verify `is_disabled = 0` afterward. **Not every module gets the same authorization shape** —
+Properties/Units/Templates are "any company member views, Admin/Manager mutates," but
+Inspections is narrower ("assigned inspector or Admin/Manager mutates") because an in-progress
+inspection is one person's active work, not shared reference data; check what a module actually
+represents before copying the previous module's permission pattern wholesale. Python 3.14,
+dependencies pinned with `>=` floors in `requirements.txt` — see `backend/README.md`.
 
 ## Next tasks
 
-1. Commit this batch (Inspection Templates API) to git.
-2. Phase 8 — Inspection Engine (`prompts/backend_prompt.md`, Prompt 8): the actual
-   start/resume/answer/submit flow. `Inspections`/`InspectionResponses` models, the
-   `TemplateVersionUsed`/snapshot-columns machinery from the Phase 1 §13.1 sign-off (this is
-   where it actually gets exercised for the first time), mandatory-question validation before
-   submit, a completion-percentage calculation service. The biggest, most business-logic-heavy
-   phase so far — budget real time for it, don't expect it to go as quickly as Phase 7 did.
+1. Commit this batch (Inspection Engine) to git.
+2. Phase 9 — Photo & Video Uploads (`prompts/backend_prompt.md`, Prompt 9): the `IMediaStorageService`
+   abstraction (local filesystem now, swappable to blob storage later — `PROJECT_PLAN.md §8`),
+   `MediaFiles` model, upload/retrieve/delete endpoints, content-type/size validation. Once this
+   exists, inspection responses can finally attach real photos (currently `AllowPhoto`/
+   `RequirePhoto` on questions are unenforceable — no mechanism exists yet to check them, and
+   Phase 8 deliberately did not try to fake one).
 
 ## Files that require attention
 

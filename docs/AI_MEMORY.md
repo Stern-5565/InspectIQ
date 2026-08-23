@@ -275,6 +275,62 @@ prove the trigger is back on, not just assumed. **This disable/delete/re-enable 
 test cleanup only and must never appear in application code** - anywhere it shows up outside
 `tests/`, that's a bug, not a legitimate use of the escape hatch.
 
+## 2026-08-23 — Phase 8 (Inspection Engine) built, the biggest phase so far
+
+The core loop scope Prompt 8 describes: start an inspection from a template (snapshotting every
+active question into a frozen `InspectionResponse`), answer/note/mark-NA, track completion, block
+submission until mandatory questions are done, and lock everything once submitted. Deliberately
+excluded the three sub-features Prompt 8 mentions whose own modules don't exist yet - photos/
+videos (Phase 9), creating a maintenance issue or risk assessment from a response (Phases 10/13)
+- with a comment in `app/api/inspections.py` explaining why, so a future session doesn't read
+their absence as an oversight.
+
+**`InspectionResponse` ordering deliberately does NOT use a live join to
+`InspectionQuestion.SortOrder`.** Responses are batch-created in template `SortOrder` at
+inspection-start time, and then ordered thereafter by `InspectionResponseId` (creation order) -
+not re-sorted via the question's current `SortOrder` on every read. This matters: if a template
+gets reordered later, an already-started inspection's response order must stay exactly as it was
+when the inspector saw it, not silently reshuffle underneath them. `SortOrder` was deliberately
+never added to the frozen snapshot columns (`docs/DATABASE.md §4`) because relying on creation
+order achieves the same historical-stability property for free, without a new column.
+
+**Mandatory-question validation at submit time uses the LIVE `InspectionQuestion.IsMandatory`,
+not a snapshot** - the one deliberate, documented exception to "always render from the snapshot."
+The reasoning: response *content* (what the inspector saw and answered) must stay historically
+frozen for report accuracy, but a validation *rule* is different in kind - if an admin changes a
+question from mandatory to optional while an inspection is still in progress, the inspector
+submitting today should get today's rule, not a stale one from when they started. This is a
+narrow, deliberate carve-out, not a general permission to join to the live template wherever
+convenient - see `inspection_response_repository.list_unanswered_mandatory`'s own comment before
+copying this pattern elsewhere.
+
+**Authorization is narrower here than any prior module, and that's correct, not an
+inconsistency.** Properties/Units/Templates all follow "any company member can view, only
+Admin/Manager can mutate." Inspections adds a THIRD tier: only the inspection's own assigned
+`InspectorUserId`, or an Administrator/Manager, can answer questions or submit - a different
+Inspector at the same company is not enough, even though they share the exact same role. The
+reasoning, documented in `inspection_service._ensure_can_edit`: a property is shared reference
+data everyone in the company legitimately works with; an in-progress inspection is one specific
+person's active work-in-progress, and letting any same-titled colleague silently edit it is a
+real, not hypothetical, data-integrity risk. Verified with a genuine two-inspector test (the
+non-owning inspector gets 403) and a manager-override test (200) - not just asserted from the
+docstring.
+
+**Immutability after submission is enforced at the service layer, not the database** - unlike
+`InspectionTemplates`, `Inspections`/`InspectionResponses` have no `INSTEAD OF DELETE`-style
+trigger. `update_response` and `submit_inspection` both check `Status == "Submitted"` and reject
+with 409. This also directly satisfies one of scope Prompt 19's explicitly named dangerous edge
+cases ("Duplicate submission") ten phases before Phase 18 (Testing) was scheduled to check for
+it - worth remembering that some of Prompt 19's checklist gets covered incidentally by earlier
+phases doing their job correctly, not only by a dedicated testing pass at the end.
+
+**Verified live with a full realistic workflow**, not just individual endpoint pokes: a real
+Inspector login, a real property, a real template, a real started inspection (21 sections, 102
+responses), one real answered question, a completion percentage confirmed at exactly the expected
+value (1.0%, i.e. 1/102), and a submit attempt that correctly listed 12 remaining mandatory
+questions (13 total minus the one just answered) - proving the whole chain works together, not
+just each piece in isolation.
+
 **Demo users seeded** (`backend/scripts/seed_demo_users.py`, run via `python -m
 scripts.seed_demo_users` from `backend/`, idempotent): one user per role at Northgate Property
 Management (`admin@northgatepm.example`, `manager@`, `inspector@`, `maintenance@`, `viewer@`) +
