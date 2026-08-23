@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
-from app.api import auth, health
+from app.api import auth, health, properties, units
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging_config import configure_logging
@@ -38,3 +38,5 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(properties.router, prefix="/api")
+app.include_router(units.router, prefix="/api")

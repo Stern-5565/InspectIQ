@@ -86,6 +86,39 @@ Current status. Overwrite/update this file at the end of every session or phase 
     closing the gap flagged since Phase 2: 6 working demo logins now exist (5 Northgate — one
     per role — + 1 Bright Spaces Administrator), all password `Password123!`. Verified for real:
     logged in as `admin@northgatepm.example` against a live server and got back real tokens.
+- **Phase 6 (Properties + Units) complete**, per scope Prompt 7, verified against the real DB
+  and a real running server:
+  - `app/models/property.py`, `unit.py` (both added to `models/__init__.py` immediately, before
+    writing any route — applying the Phase 5 lesson instead of relearning it).
+  - `app/schemas/enums.py` — `PropertyType`/`PropertyStatus`/`InspectionFrequency`/
+    `OccupancyStatus` as Python enums mirroring the DB `CHECK` constraints exactly, so a bad
+    value gets a clean 422 before reaching SQL Server. **Real Python-3.14-specific gotcha hit
+    and fixed**: a Pydantic field named the same as its own enum type (e.g.
+    `PropertyType: PropertyType`) fails under Python 3.14's lazy annotation evaluation (PEP
+    649) — confirmed with a real `TypeError: unsupported operand type(s) for |: 'NoneType' and
+    'NoneType'` before fixing it by aliasing every enum import (`PropertyType as
+    PropertyTypeEnum`, etc.) in `schemas/property.py` and `schemas/unit.py`.
+  - `app/schemas/pagination.py` — one generic `PaginatedResponse[T]` reused by both modules.
+  - `app/repositories/property_repository.py` (has its own `CompanyId` column, straightforward
+    isolation filter), `unit_repository.py` (Units has **no** `CompanyId` column of its own —
+    every query joins through `Properties` and filters on `Properties.CompanyId`).
+  - `app/services/property_service.py`, `unit_service.py` — **cross-company access returns 404,
+    not 403**, a deliberate choice so a property/unit belonging to another company is
+    indistinguishable from one that doesn't exist (verified with a real cross-company test and
+    live curl request, not just asserted).
+  - `app/api/properties.py`, `units.py` — list/get open to any authenticated company user
+    (view), create/update/deactivate/occupancy-change gated to Administrator/Manager via
+    `require_roles`. **Interpretive call, documented in the route file itself**: the scope's
+    "Inspectors can view properties they have permission to inspect" has no per-property
+    assignment table in the schema, so "permission to inspect" was read as company membership.
+  - 14 new tests (32 total), all against the real DB with throwaway users/properties/units
+    cleaned up per-test: authentication required, company-scoped listing, cross-company 404 on
+    both properties and units (including creating a unit under another company's property),
+    role-based create authorization, invalid-enum rejection, partial-update semantics,
+    deactivate hiding from the default list but not direct lookup, the dedicated
+    occupancy-change endpoint proven independent from the general PATCH.
+  - **Verified live**: real demo login → list properties → list units → cross-company 404, all
+    against a genuinely running server with the actual seeded demo data, not just pytest.
 
 ## Currently being worked on
 
@@ -137,23 +170,23 @@ now with 6 real, working demo logins (see Phase 5 above) — password `Password1
 
 ## Coding standards
 
-Established and followed through Phase 5: routes thin (`app/api/auth.py`/`health.py` — parse
-input, call one service/dependency, return a schema), all business logic (credential checking,
-token issuance, the enumeration-avoidance decision) lives in `app/services/`, repositories
-(`app/repositories/user_repository.py`) do DB access only, `app/schemas/` owns response shapes
-and never exposes `PasswordHash`, `app/core/exceptions.py` owns error-to-HTTP-status mapping so
-no service constructs `HTTPException` directly, `app/security/roles.py` centralizes role-name
-constants (never raw string comparisons). Every new SQLAlchemy model must be added to
-`app/models/__init__.py` (see Known Bugs above for why). Python 3.14, dependencies pinned with
+Established and followed through Phase 6: routes thin, business logic lives in `app/services/`,
+repositories do DB access only (and must join through the right parent table when a tenant
+table has no `CompanyId` of its own, like `Units`), `app/schemas/` owns response shapes and
+input validation (enums mirroring DB `CHECK` constraints), `app/core/exceptions.py` owns
+error-to-HTTP-status mapping, `app/security/roles.py` centralizes role-name constants. Every new
+SQLAlchemy model must be added to `app/models/__init__.py`. Every new Pydantic enum field must
+have its enum type imported under an alias if the field name matches the type name (Python
+3.14 lazy-annotation gotcha, see Phase 6 entry above). Python 3.14, dependencies pinned with
 `>=` floors in `requirements.txt` — see `backend/README.md` for setup/run/test instructions.
 
 ## Next tasks
 
-1. Commit this batch (auth module) to git.
-2. Phase 6 — Properties + Units (`prompts/backend_prompt.md`, Prompt 7): full CRUD, filtering,
-   pagination, `require_roles`-gated authorization (Managers/Admins manage, Inspectors view),
-   service + repository layers, tests. First module that will actually need `Property` models
-   and will exercise `require_roles` through a real protected route, not just directly.
+1. Commit this batch (Properties + Units module) to git.
+2. Phase 7 — Inspection Templates API (`prompts/backend_prompt.md`, Prompt 8 covers the engine
+   end-to-end, but scope's phase list treats templates and the engine as adjacent phases): expose
+   the already-seeded `InspectionTemplates`/`Sections`/`Questions` via read APIs, since Phase 8
+   (the inspection engine itself) will need to fetch a template to start an inspection from.
 
 ## Files that require attention
 

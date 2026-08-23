@@ -199,6 +199,52 @@ code paths never trigger. **Every future session adding a new SQLAlchemy model m
 calling a model "done."** This is now the standing verification bar for backend work, not a
 one-off caution.
 
+## 2026-08-23 — Phase 6 (Properties + Units) built, a real Python 3.14 gotcha found
+
+Built per scope Prompt 7: `Property`/`Unit` models, enum-validated schemas, repositories,
+services, routes, 14 new tests (32 total) - all against the real DB, all cleaned up per-test.
+
+**Real, non-obvious bug found and fixed**: a Pydantic field named identically to its own enum
+type - `PropertyType: PropertyType`, `PropertyStatus: PropertyStatus`, etc. - crashes under
+Python 3.14 specifically, with `TypeError: unsupported operand type(s) for |: 'NoneType' and
+'NoneType'` when evaluating `PropertyType | None`. Python 3.14's PEP 649 lazy annotation
+evaluation resolves a class's own annotations in a namespace where the class's own attribute
+name - even a bare, value-less annotation like `PropertyType: PropertyType` - shadows the
+module-level import of the same name, unlike pre-3.14 Python's eager evaluation. This is a
+genuine version-specific trap, not a hypothetical one - it was hit for real while writing
+`app/schemas/property.py`. **Fixed by aliasing every enum import** (`from app.schemas.enums
+import PropertyType as PropertyTypeEnum`) in both `schemas/property.py` and `schemas/unit.py`.
+**Any future schema reusing a DB column name that matches an enum class name must do the same
+aliasing** - this is now a standing rule for this project, not a one-off fix, and it's specific
+to running on Python 3.14 (a pre-3.14 project might never have hit it).
+
+**Cross-company access returns 404, not 403** - `property_service.get_property` and
+`unit_service.get_unit` both raise `NotFoundError` (never `ForbiddenError`) when a resource
+exists but belongs to another company, so a wrong-company lookup is indistinguishable from a
+lookup of something that was never there at all. Verified for real: a live `curl` request as
+the Bright Spaces admin for a Northgate `PropertyId` returned `404 {"detail":"Property not
+found."}`, not a 403. This is the applied, tested version of the isolation principle
+`docs/DATABASE.md §10.1` only described in the abstract - now there's a working example to
+copy for every future module that needs the same protection (Maintenance, Risk, etc.).
+
+**`Units` has no `CompanyId` column of its own** (by design, `docs/DATABASE.md §2`/`§9.5` - only
+tables that needed *direct* isolation queries got a denormalized `CompanyId`; Units is reached
+via a cheap single join to `Properties`). `unit_repository.py`'s every method joins through
+`Properties` and filters on `Properties.CompanyId` - never trusts a bare `UnitId` to imply
+company-scoping. Tested explicitly: creating a unit under another company's `PropertyId` (a
+plausible ID-guessing attack, not just an accidental cross-company GET) correctly 404s.
+
+**Interpretive design call, documented in `app/api/properties.py`'s own module docstring**:
+scope Prompt 7 says "Inspectors can view properties they have permission to inspect," but no
+per-property assignment table exists in the 25-table schema. Read as company membership: any
+authenticated user in the property's company can view (Inspector/Maintenance/Viewer all
+plausibly need to see property details to do their jobs), only Administrator/Manager can
+create/update/deactivate. Unit occupancy-status changes were deliberately kept in that same
+Administrator/Manager bracket for this phase too, even though realistically an Inspector doing
+a walkthrough is the one who'd discover a vacancy - that flow is expected to arrive through the
+Inspection engine (Phase 8) calling into unit updates via its own service, not through this
+standalone API being opened up prematurely. Revisit if Phase 8 needs a different answer.
+
 **Demo users seeded** (`backend/scripts/seed_demo_users.py`, run via `python -m
 scripts.seed_demo_users` from `backend/`, idempotent): one user per role at Northgate Property
 Management (`admin@northgatepm.example`, `manager@`, `inspector@`, `maintenance@`, `viewer@`) +
