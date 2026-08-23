@@ -311,8 +311,7 @@ convention), commit to git with an honest message, then stop for review before t
 
 ## 13. Important Database Design Decisions
 
-1. **InspectionResponse snapshot strategy** — the single hardest-to-change decision in the schema,
-   flagged here for explicit owner sign-off before Phase 2 SQL is written:
+1. **InspectionResponse snapshot strategy — CONFIRMED 2026-08-23 after explicit owner review.**
    - `InspectionResponses` keeps a foreign key to `InspectionQuestion` (for analytics/reporting
      joins), **plus** frozen columns (`QuestionTextSnapshot`, `SectionNameSnapshot`,
      `AnswerTypeSnapshot`) captured at the moment the inspection starts.
@@ -321,8 +320,24 @@ convention), commit to git with an honest message, then stop for review before t
    - Alternative considered and rejected: versioning the whole `InspectionTemplate` (a
      `TemplateVersion` table). More "correct" in a strict sense, but meaningfully more complex for
      a v1/MVP, and the scope's own emphasis is on getting the Template→Section→Question→
-     Inspection→Response shape right, not on template version history as a feature. Can be
-     revisited in V2 if templates need to be *edited* (not just extended) frequently.
+     Inspection→Response shape right, not on template version history as a feature.
+   - **Two regret-mitigations added during review, both required from Phase 2 onward, not
+     optional polish:**
+     1. **`InspectionQuestions` (and Sections/Templates) are soft-delete only — never hard
+        deleted.** A hard delete would silently break the FK that frozen columns deliberately
+        keep around for analytics joins. This must be enforced at the repository layer (no
+        `DELETE` statement against these tables, ever), not just documented as a convention.
+     2. **A `Version` integer on `InspectionTemplate` (bumped on any edit to it or its
+        Sections/Questions), stored on `Inspections.TemplateVersionUsed` at inspection-start
+        time.** This is *not* full version history — it doesn't let you reconstruct exactly what
+        version N looked like — but it cheaply answers "which inspections predate/postdate this
+        checklist change," which is the one realistic compliance question frozen columns alone
+        can't answer. If full template version history is ever needed later, this column is
+        exactly the backfill data a `TemplateVersions` table would need — the migration path is
+        additive, not a rewrite.
+   - Net effect: historical reports are accurate (the core requirement), template-change auditing
+     is cheap and present from v1, and nothing here blocks adding real versioning later if a
+     concrete need for it shows up.
 2. **Soft delete on tenant-owned reference data** (Properties, Units, Templates) rather than hard
    delete — hard-deleting a Property with historical Inspections would either cascade-delete real
    inspection history or orphan FKs; neither is acceptable given §18's audit-trail requirement.
@@ -363,9 +378,11 @@ convention), commit to git with an honest message, then stop for review before t
 
 ---
 
-## Open question for owner review before Phase 2
+## Phase 1 sign-off
 
-§13.1 above (the InspectionResponse snapshot strategy) is the one decision worth explicitly
-confirming before SQL gets written, since it's expensive to change after inspections exist in
-production. Everything else in this document is a reasonable default that can still flex during
-Phase 2's own "list every table, explain design decisions, point out possible problems" step.
+§13.1 (the InspectionResponse snapshot strategy) was reviewed and confirmed with the owner on
+2026-08-23, including two regret-mitigations (soft-delete-only on `InspectionQuestions`, a
+`Version`/`TemplateVersionUsed` counter) folded into the decision. No open questions remain —
+everything else in this document is a reasonable default that can still flex during Phase 2's own
+"list every table, explain design decisions, point out possible problems" step. **Phase 1 is
+complete; Phase 2 (Database Design) starts next.**

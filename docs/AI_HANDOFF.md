@@ -12,9 +12,10 @@ Current status. Overwrite/update this file at the end of every session or phase 
 
 ## Currently being worked on
 
-- Nothing in progress. Waiting on owner review of `docs/PROJECT_PLAN.md` §13.1 (the
-  InspectionResponse snapshot strategy — the one decision worth confirming before SQL is written)
-  before starting Phase 2 (Database Design).
+- Nothing in progress. `docs/PROJECT_PLAN.md` §13.1 reviewed and confirmed by the owner
+  (2026-08-23) — frozen-column snapshot strategy, with soft-delete-only on InspectionQuestions and
+  a Version/TemplateVersionUsed counter as mandatory additions. Phase 1 is fully signed off.
+  Phase 2 (Database Design) is next and unblocked.
 
 ## Important decisions
 
@@ -37,7 +38,9 @@ layering rules (routes thin, services own business logic, repositories own DB ac
 
 Phase 2 — Database Design (`prompts/database_prompt.md`, Prompt 2): list every table with purpose/
 relationships/design decisions/possible problems, then generate SQL Server schema files under
-`database/`.
+`database/`. Must include the two mandatory additions from the §13.1 sign-off: soft-delete-only
+enforcement on InspectionQuestions/Sections/Templates, and `InspectionTemplate.Version` +
+`Inspections.TemplateVersionUsed` columns.
 
 ## Files that require attention
 
