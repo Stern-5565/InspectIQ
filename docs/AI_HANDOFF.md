@@ -9,59 +9,73 @@ Current status. Overwrite/update this file at the end of every session or phase 
 - Scope document preserved (`docs/SCOPE.md`) and split into phase prompts (`prompts/`).
 - **Phase 1 (Architecture) complete** — full design in `docs/PROJECT_PLAN.md`, including the
   reviewed-and-confirmed `InspectionResponse` snapshot strategy (§13.1).
-- **Phase 2, step 1 (Database Design doc) complete** — 25-table design in `docs/DATABASE.md`.
-- **Phase 2, step 2 (actual SQL) mostly complete and verified against a real local SQL Server
-  instance** (`localhost\SQLEXPRESS`, database `InspectIQDb`, Windows auth):
-  - `database/00_CreateDatabase.sql` — done.
-  - `database/tables/01_CoreTables.sql` through `08_NotificationAuditTables.sql` — all 25 tables
-    created. One deferred FK (`MeterReadings.PhotoMediaFileId` → `MediaFiles`) added via
-    `ALTER TABLE` in `07_MediaAndNotesTables.sql` once `MediaFiles` exists.
-  - `database/constraints/09_Constraints.sql` — every enum `CHECK` constraint, plus three
-    `INSTEAD OF DELETE` triggers that make the Phase 1 soft-delete-only requirement a real DB
-    guarantee (blocks hard deletes on `InspectionTemplates`/`Sections`/`Questions`), not just a
-    documented convention.
-  - `database/indexes/10_Indexes.sql` — 43 non-clustered indexes covering every realistically
-    filtered/joined FK column plus the Dashboard module's query patterns (scope §23).
-  - Two throwaway verification scripts under `database/scripts/` (`test_01_02_verify.sql`,
-    `test_09_constraints_verify.sql`) exercise the constraints/triggers against real data and
-    clean up after themselves — all assertions passed.
+- **Phase 2 (Database Design + full SQL) complete**, verified against a real local SQL Server
+  instance (`localhost\SQLEXPRESS`, database `InspectIQDb`, Windows auth) — every layer, not just
+  the table shapes:
+  - `docs/DATABASE.md` — the 25-table design doc.
+  - `database/00_CreateDatabase.sql`, `database/tables/01`–`08` — all 25 tables.
+  - `database/constraints/09_Constraints.sql` — every enum `CHECK` constraint, plus 3
+    `INSTEAD OF DELETE` triggers making the Phase 1 soft-delete-only requirement a real DB
+    guarantee, not just a documented convention.
+  - `database/indexes/10_Indexes.sql` — 43 non-clustered indexes.
+  - `database/seed/11_SeedRoles.sql` (5 roles), `12_SeedInspectionTemplate.sql` (the Monthly
+    Property Inspection template — 21 sections, 102 questions, per scope Prompt 4),
+    `13_SeedSampleData.sql` (global default risk matrix as core config + 2 demo companies/4
+    properties/11 units as local-dev-only data — `Users` deliberately NOT seeded yet, see below).
+  - `database/views/14_InspectionViews.sql` — 5 reusable views (`vw_InspectionSummary`,
+    `vw_OverdueInspections`, `vw_OpenMaintenanceIssues`, `vw_ActiveRiskAssessments`,
+    `vw_PropertyUnitCounts`).
+  - `database/reports/15_DashboardQueries.sql` — every scope §23 dashboard metric as a
+    standalone, company-scoped, `ISNULL`-safe query, ready to lift into `DashboardRepository`
+    in Phase 15.
+  - `database/scripts/00_RunAll.sql` — **tested for real**: dropped `InspectIQDb` entirely and
+    rebuilt it from nothing via this one script, then re-verified every count (25 tables, 5
+    roles, 21 sections/102 questions, 2 companies/4 properties, 4 risk levels, 43 indexes, 3
+    triggers, 5 views). It genuinely works end-to-end, not just "each file worked in isolation."
 
 ## Currently being worked on
 
-- Nothing in progress. Not yet committed to git as of this note being written — do that next,
-  then continue with seed data (`seed/11_SeedRoles.sql`, `12_SeedInspectionTemplate.sql`,
-  `13_SeedSampleData.sql`), then views/reports/`00_RunAll.sql`.
+- Nothing in progress. Committing this batch to git is the next action, then Phase 2 is fully
+  closed and Phase 3/4 (which the scope's 20-phase list treats as blending into FastAPI
+  foundation work) is next.
 
 ## Important decisions
 
 See `docs/AI_MEMORY.md` for the reasoning behind each; summarized in `docs/PROJECT_PLAN.md` and
-`docs/DATABASE.md §9`. Two real gotchas discovered while writing the actual SQL (not previously
+`docs/DATABASE.md §9`. Real gotchas discovered while writing the actual SQL (not previously
 documented, worth knowing for any future script against this schema):
 
 1. **Any statement that creates or writes to a table with a `PERSISTED` computed column
-   (`RiskAssessments.RiskScore`) or a filtered index needs `SET ANSI_NULLS ON` and
-   `SET QUOTED_IDENTIFIER ON` in that session first**, or SQL Server rejects it (`Msg 1934`).
+   (`RiskAssessments.RiskScore`) OR a filtered index (`Properties.NextInspectionDue`,
+   `Properties.PropertyStatus`, `MaintenanceIssues.DueDate`) needs `SET ANSI_NULLS ON` and
+   `SET QUOTED_IDENTIFIER ON` in that session first**, or SQL Server rejects it (`Msg 1934`) —
+   this bit `13_SeedSampleData.sql` on a plain `Properties` INSERT, not just `RiskAssessments`.
    SQLAlchemy/pyodbc set these by default, so the application itself won't hit this — but any
-   hand-written script (seed data, ad hoc fixes) will, and did during this session.
-2. **Filtered index predicates don't support `NOT IN`** (SQL Server parser rejects it,
-   `Msg 102`) — `IX_MaintenanceIssues_DueDate` originally tried
-   `WHERE Status NOT IN ('Completed', 'Closed')` and had to be rewritten as
-   `WHERE Status <> 'Completed' AND Status <> 'Closed'` (two comparisons ANDed, which the
-   filtered-index predicate grammar does support).
+   hand-written script will.
+2. **Filtered index predicates don't support `NOT IN`** (`Msg 102`) — use
+   `x <> a AND x <> b` instead of `x NOT IN (a, b)`.
+3. **`SUM(CASE...)` over zero matching rows returns `NULL`, not `0`.** Caught by actually
+   running `15_DashboardQueries.sql` against a company with no maintenance/risk/cleaning data
+   yet — every dashboard aggregate is wrapped in `ISNULL(..., 0)` as a result. A dashboard card
+   must never render `NULL` as if it were an empty state.
+4. **`RETURN` inside a `.sql` script only exits the current batch, not the whole script.** An
+   idempotency guard (`IF EXISTS (...) BEGIN ... RETURN; END`) must be in the *same batch* as
+   the logic it's meant to skip — a `GO` between the guard and the inserts silently defeats it.
+   Caught in `12_SeedInspectionTemplate.sql` before it caused a real duplicate-data bug.
 
 ## Known bugs
 
-None — no application code exists yet. The schema itself is verified working (constraints,
-triggers, and the computed column all behave correctly under real test inserts).
+None. The schema (tables, constraints, triggers, indexes, seed data, views, dashboard queries)
+is fully implemented and verified — including a from-scratch rebuild via `00_RunAll.sql`. No
+application code exists yet.
 
 ## Database structure
 
-Fully implemented, not just designed — see `docs/DATABASE.md` for the design and
-`database/tables/`, `database/constraints/`, `database/indexes/` for the actual SQL, all applied
-to a real local `InspectIQDb`. Both structural requirements from the Phase 1 sign-off are live:
-soft-delete-only (enforced by trigger, not just convention) and
-`InspectionTemplate.Version`/`Inspections.TemplateVersionUsed`. `RiskAssessments.RiskScore` is a
-verified-working `PERSISTED` computed column.
+Fully implemented — see `docs/DATABASE.md` for the design, `database/` for the SQL, all applied
+and verified against a real local `InspectIQDb`. Both structural requirements from the Phase 1
+sign-off are live and trigger-enforced. `RiskAssessments.RiskScore` is a verified-working
+`PERSISTED` computed column. The default inspection template (21 sections/102 questions) and
+global risk matrix are seeded; 2 demo companies with realistic property/unit data exist locally.
 
 ## Coding standards
 
@@ -70,15 +84,12 @@ layering rules (routes thin, services own business logic, repositories own DB ac
 
 ## Next tasks
 
-1. Commit the current SQL (tables/constraints/indexes) to git.
-2. Seed data: `seed/11_SeedRoles.sql` (5 roles), `seed/12_SeedInspectionTemplate.sql` (the
-   Monthly Property Inspection template from Prompt 4 — not yet written, needs its own pass
-   through `prompts/database_prompt.md`'s Prompt 4 text), `seed/13_SeedSampleData.sql` (demo
-   companies/properties/users for local dev, same spirit as PropertyManager's
-   `06-seed-demo-data.sql` but nothing in production per that project's own lesson).
-3. `views/14_InspectionViews.sql`, `reports/15_DashboardQueries.sql`.
-4. `scripts/00_RunAll.sql` once every file above exists.
-5. Then Phase 3 (sample data + SQL queries) blends into Phase 4 (FastAPI foundation).
+1. Commit this batch (seed/views/reports/00_RunAll.sql) to git.
+2. Phase 4 — FastAPI foundation (`prompts/backend_prompt.md`, Prompt 5): app skeleton, config,
+   DB connection (SQLAlchemy models mapping to this exact schema), health-check endpoint.
+3. **`Users` still needs seeding once Phase 5 (Authentication) exists** and can produce a real
+   password hash — don't seed fake-hash demo users before then (see `13_SeedSampleData.sql`'s
+   header comment for the reasoning).
 
 ## Files that require attention
 

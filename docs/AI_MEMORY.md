@@ -79,3 +79,52 @@ doc, worth remembering for any future hand-written script against this schema �
 chosen and marked `INTERPRETIVE` in the SQL comments — these are the one part of the Phase 2 SQL
 that wasn't directly dictated by the scope doc, so worth a sanity check against real usage once
 the app exists rather than treating them as immutable.
+
+## 2026-08-23 — Phase 2 fully closed: seed data, views, dashboard queries, verified rebuild
+
+Completed the rest of Phase 2 in the same session as the table/constraint/index work above:
+5 roles, the full default "Monthly Property Inspection" template (21 sections, 102 questions,
+built from scope's Prompt 4 - used the scope's own example questions verbatim where given, e.g.
+Emergency Lighting's 5 questions, and wrote reasonable defaults for sections the scope only names
+without detailing, e.g. General Property Condition, Entrance, Hallways).
+
+**Deliberate design call on 4 "gateway" sections** (Communal Cleaning, Units, Vacant Units,
+Maintenance, Risk Assessment): these carry only 1-2 checklist questions each rather than a full
+question set, because their real substance already lives in dedicated tables/flows -
+CleaningAreas/CleaningInspections for grading, VacantUnitInspections for vacant units,
+MaintenanceIssues/RiskAssessments creatable from any question throughout the inspection.
+Duplicating that detail as regular checklist questions would have fought the schema's own design
+rather than complemented it. If a future session is tempted to "fill out" these sections with
+more generic Yes/No questions, that's very likely a regression, not an improvement - check this
+note first.
+
+**`Users` was deliberately left unseeded.** A real `PasswordHash` needs Phase 5's actual hashing
+algorithm; a fake placeholder hash would create rows that look like working demo logins but
+aren't, which is worse than no demo users at all. Seed real demo users once Phase 5 exists.
+
+**The global default risk matrix (`RiskMatrixLevels`, `CompanyId IS NULL`) was seeded as CORE
+CONFIG, not demo data** - it lives in `13_SeedSampleData.sql` but in its own clearly-separated
+Part A, because `RiskAssessments.RiskLevel` has nothing to snapshot from without it in ANY
+environment, including production. Only Part B (the 2 demo companies) is local-dev-only. Don't
+let a future "don't run seed data in production" instinct skip Part A too.
+
+**`00_RunAll.sql` was tested for real, not just assembled**: dropped `InspectIQDb` completely
+(`ALTER DATABASE ... SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE`) and rebuilt it from
+nothing through the single script, then re-verified every count matched expectations. This is the
+only way to actually know the file ordering and idempotency guards work together correctly - each
+file having worked individually when run in sequence during development does NOT prove the
+assembled `00_RunAll.sql` works, since e.g. the `RETURN`-only-exits-current-batch bug (below)
+would have passed every individual-file test and only shown up on a true fresh run.
+
+**Three more real bugs caught by actually running things, not just assumed**:
+1. `SUM(CASE...)` returns `NULL` over zero rows, not `0` - every dashboard aggregate in
+   `15_DashboardQueries.sql` needed `ISNULL(..., 0)`. Caught by running the queries against
+   Northgate before any MaintenanceIssues/RiskAssessments/CleaningInspections existed.
+2. `RETURN` in a `.sql` script only exits the current batch, not the whole script - a `GO`
+   between an idempotency guard and the logic it's meant to skip silently defeats the guard.
+   Caught in `12_SeedInspectionTemplate.sql` by testing re-run behavior explicitly, not assumed.
+3. `Properties` has filtered indexes (`IX_Properties_NextInspectionDue`,
+   `IX_Properties_PropertyStatus`), so it needs the same `ANSI_NULLS`/`QUOTED_IDENTIFIER ON`
+   session settings as `RiskAssessments` does for its computed column - this wasn't obvious from
+   the RiskAssessments-focused gotcha already documented above, and bit
+   `13_SeedSampleData.sql`'s very first `Properties` INSERT.
