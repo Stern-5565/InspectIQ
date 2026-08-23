@@ -119,6 +119,37 @@ Current status. Overwrite/update this file at the end of every session or phase 
     occupancy-change endpoint proven independent from the general PATCH.
   - **Verified live**: real demo login → list properties → list units → cross-company 404, all
     against a genuinely running server with the actual seeded demo data, not just pytest.
+- **Phase 7 (Inspection Templates API) complete** — deliberately scoped as read-only (list +
+  full-nested-detail), since scope §9 treats template *authoring* as an "eventually" feature,
+  not MVP-critical; these two endpoints exist because Phase 8 (the inspection engine) will need
+  to fetch a template to start an inspection from:
+  - `app/models/inspection_template.py`, `inspection_section.py`, `inspection_question.py` —
+    added to `models/__init__.py` immediately, and a real query against them (`SessionLocal` +
+    the relationships) was run and checked *before* writing any route, applying the Phase 5
+    lesson proactively rather than discovering a registration bug live again.
+  - Both `sections` and `questions` relationships carry `order_by=...SortOrder` at the model
+    level, so every query path (list, detail, future inspection-start logic) gets them in the
+    right order for free — not left to callers to remember.
+  - `app/repositories/inspection_template_repository.py` — the "global default + per-company
+    override" isolation pattern (`CompanyId IS NULL OR CompanyId = @company_id`), same family as
+    `RiskMatrixLevels`. A company-specific template belonging to another company matches neither
+    condition, so it's excluded by the `WHERE` clause itself — the same 404-not-403 outcome as
+    Properties/Units, achieved here without an extra check.
+  - `GET /api/inspection-templates` (lightweight list), `GET /api/inspection-templates/{id}`
+    (full nested Sections→Questions tree in one response — a mobile client needs the whole
+    checklist structure at once, not N+1 calls per section).
+  - 5 new tests (37 total): auth required, the global default appears in the list (and the list
+    response omits nested `Sections`), the detail response returns all 21 sections/102 questions
+    in the correct `SortOrder`, a nonexistent template 404s, and a throwaway company-specific
+    template is invisible to another company both by direct ID and in the list view.
+  - **A real test-cleanup wrinkle, not an app bug**: the throwaway company-specific template
+    created for the isolation test hit the Phase 2 `INSTEAD OF DELETE` trigger on hard `DELETE`
+    (working as designed — it protects real data). Test teardown uses the same
+    disable-trigger/delete/re-enable-trigger pattern originally used to verify the trigger
+    itself, and explicitly confirms afterward that the trigger is back to `is_disabled = 0` —
+    this escape hatch is for test cleanup only, application code must never use it.
+  - **Verified live**: a real Inspector demo login listed the template and fetched its full
+    102-question structure over actual HTTP, not just through pytest.
 
 ## Currently being worked on
 
@@ -170,23 +201,31 @@ now with 6 real, working demo logins (see Phase 5 above) — password `Password1
 
 ## Coding standards
 
-Established and followed through Phase 6: routes thin, business logic lives in `app/services/`,
-repositories do DB access only (and must join through the right parent table when a tenant
-table has no `CompanyId` of its own, like `Units`), `app/schemas/` owns response shapes and
-input validation (enums mirroring DB `CHECK` constraints), `app/core/exceptions.py` owns
-error-to-HTTP-status mapping, `app/security/roles.py` centralizes role-name constants. Every new
-SQLAlchemy model must be added to `app/models/__init__.py`. Every new Pydantic enum field must
-have its enum type imported under an alias if the field name matches the type name (Python
-3.14 lazy-annotation gotcha, see Phase 6 entry above). Python 3.14, dependencies pinned with
-`>=` floors in `requirements.txt` — see `backend/README.md` for setup/run/test instructions.
+Established and followed through Phase 7: routes thin, business logic lives in `app/services/`,
+repositories do DB access only (join through the right parent table when a tenant table has no
+`CompanyId` of its own, like `Units`; use the `CompanyId IS NULL OR CompanyId = @x` pattern for
+global-default-plus-override tables like `InspectionTemplates`/`RiskMatrixLevels`),
+`app/schemas/` owns response shapes and input validation (enums mirroring DB `CHECK`
+constraints), `app/core/exceptions.py` owns error-to-HTTP-status mapping, `app/security/roles.py`
+centralizes role-name constants. Every new SQLAlchemy model must be added to
+`app/models/__init__.py` **and sanity-queried against the real DB before writing any route that
+depends on it** (Phase 7 did this proactively and caught nothing wrong — the point is doing the
+check, not that it always finds a bug). Every new Pydantic enum field must have its enum type
+imported under an alias if the field name matches the type name (Python 3.14 lazy-annotation
+gotcha). Test cleanup for a soft-delete-only table (anything with an `INSTEAD OF DELETE`
+trigger) must disable/delete/re-enable the trigger, then verify it's back to `is_disabled = 0`
+before the test ends — never leave a data-protection trigger disabled. Python 3.14, dependencies
+pinned with `>=` floors in `requirements.txt` — see `backend/README.md`.
 
 ## Next tasks
 
-1. Commit this batch (Properties + Units module) to git.
-2. Phase 7 — Inspection Templates API (`prompts/backend_prompt.md`, Prompt 8 covers the engine
-   end-to-end, but scope's phase list treats templates and the engine as adjacent phases): expose
-   the already-seeded `InspectionTemplates`/`Sections`/`Questions` via read APIs, since Phase 8
-   (the inspection engine itself) will need to fetch a template to start an inspection from.
+1. Commit this batch (Inspection Templates API) to git.
+2. Phase 8 — Inspection Engine (`prompts/backend_prompt.md`, Prompt 8): the actual
+   start/resume/answer/submit flow. `Inspections`/`InspectionResponses` models, the
+   `TemplateVersionUsed`/snapshot-columns machinery from the Phase 1 §13.1 sign-off (this is
+   where it actually gets exercised for the first time), mandatory-question validation before
+   submit, a completion-percentage calculation service. The biggest, most business-logic-heavy
+   phase so far — budget real time for it, don't expect it to go as quickly as Phase 7 did.
 
 ## Files that require attention
 

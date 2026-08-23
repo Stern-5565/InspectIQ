@@ -245,6 +245,36 @@ a walkthrough is the one who'd discover a vacancy - that flow is expected to arr
 Inspection engine (Phase 8) calling into unit updates via its own service, not through this
 standalone API being opened up prematurely. Revisit if Phase 8 needs a different answer.
 
+## 2026-08-23 — Phase 7 (Inspection Templates API) built read-only, on purpose
+
+Scoped deliberately narrow: list + full-nested-detail, no create/edit. Scope §9 explicitly
+calls template authoring an "eventually" feature, and the actual next scope phase (the
+inspection engine, Prompt 8) needs a template to *read from* to start an inspection, not to
+*write*. Building CRUD here would have been scope creep ahead of any real need - noted
+explicitly in `app/api/inspection_templates.py`'s own module docstring so a future session
+doesn't assume the missing CRUD was an oversight.
+
+**Applied the Phase 5 lesson proactively this time**, rather than rediscovering it: added
+`InspectionTemplate`/`InspectionSection`/`InspectionQuestion` to `app/models/__init__.py`
+immediately, then ran a real query through the relationships (`template.sections[0].questions`)
+against the live seeded data *before* writing a single route or repository function. Nothing was
+broken this time - the point of doing the check isn't that it always finds a bug, it's that
+skipping it is how the Phase 5 bug happened in the first place.
+
+**`sections`/`questions` relationships carry `order_by=...SortOrder` at the model level**, not
+left to query-time `.order_by()` calls scattered across repositories - every future code path
+that walks a template (list, detail, and eventually the inspection-start logic in Phase 8) gets
+correctly ordered sections/questions for free, with no way to forget it.
+
+**New test-cleanup pattern needed and used for the first time**: the isolation test needed a
+throwaway *company-specific* `InspectionTemplate` (no such row exists in seed data - only the
+global default), and cleaning it up hit the real `INSTEAD OF DELETE` trigger from Phase 2 (working
+exactly as designed). Fixed by disabling the trigger for one statement, deleting, re-enabling it,
+and - importantly - the test also explicitly re-queries `sys.triggers.is_disabled` afterward to
+prove the trigger is back on, not just assumed. **This disable/delete/re-enable pattern is for
+test cleanup only and must never appear in application code** - anywhere it shows up outside
+`tests/`, that's a bug, not a legitimate use of the escape hatch.
+
 **Demo users seeded** (`backend/scripts/seed_demo_users.py`, run via `python -m
 scripts.seed_demo_users` from `backend/`, idempotent): one user per role at Northgate Property
 Management (`admin@northgatepm.example`, `manager@`, `inspector@`, `maintenance@`, `viewer@`) +
