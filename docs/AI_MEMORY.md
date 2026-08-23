@@ -45,3 +45,37 @@ Phase 2, not optional**:
 **Why this matters for future sessions**: if Phase 2's SQL ever ships without the soft-delete
 enforcement or the `Version`/`TemplateVersionUsed` columns, that's a regression from an explicit,
 reviewed decision — not a simplification to wave through in code review.
+
+## 2026-08-23 — Phase 2 SQL written and verified against a real local SQL Server
+
+All 25 tables, every deferred `CHECK` constraint, and 43 indexes now exist in a real local
+`InspectIQDb` (`localhost\SQLEXPRESS`, Windows auth via `sqlcmd`) — not just designed on paper.
+Verified with actual test inserts (valid/invalid data, FK violations, duplicate-unique
+violations), not just "the script ran without error."
+
+**The soft-delete-only requirement from the §13.1 sign-off is enforced by three
+`INSTEAD OF DELETE` triggers**, not just a repository-layer convention as originally scoped —
+upgraded during implementation to match the same "structural guarantee, not app convention"
+principle already used for `RiskAssessments.RiskScore` (a `PERSISTED` computed column). Verified
+live: a hard `DELETE` against `InspectionTemplates` is rejected and rolled back; `UPDATE ... SET
+IsActive = 0` still works normally. If this ever needs undoing (e.g. a legitimate bulk-cleanup
+tool), the correct approach is `DISABLE TRIGGER ... ON ...` for that one operation, not removing
+the trigger.
+
+**Two real SQL Server gotchas hit while writing the actual scripts** (not obvious from the design
+doc, worth remembering for any future hand-written script against this schema — see
+`AI_HANDOFF.md`'s "Important decisions" section for the fuller writeup):
+1. `SET ANSI_NULLS ON` / `SET QUOTED_IDENTIFIER ON` are required in-session for any DDL or DML
+   touching a table with a `PERSISTED` computed column or a filtered index — not just at table
+   creation. The app's own DB driver (pyodbc/SQLAlchemy) sets these by default, but hand-written
+   seed/fix scripts won't unless they say so explicitly.
+2. Filtered index `WHERE` predicates don't support `NOT IN` — only `IN`, comparison operators,
+   `IS NULL`/`IS NOT NULL`, and `AND`. Use `x <> a AND x <> b` instead of `x NOT IN (a, b)`.
+
+**Interpretive design calls made while writing `09_Constraints.sql`**: the scope doc names a
+"Status" field on `CleaningInspections`, `RiskAssessments`, and an "update type" on
+`MaintenanceUpdates` without enumerating exact values (unlike `Inspections.Status` or
+`MaintenanceIssues.Status`, which the scope spells out explicitly). Reasonable default enums were
+chosen and marked `INTERPRETIVE` in the SQL comments — these are the one part of the Phase 2 SQL
+that wasn't directly dictated by the scope doc, so worth a sanity check against real usage once
+the app exists rather than treating them as immutable.
