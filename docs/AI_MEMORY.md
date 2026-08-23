@@ -160,3 +160,50 @@ need to construct `HTTPException` directly. No models/repositories/services exis
 `httpx2` package) - a version-pairing artifact of very new Starlette (1.6.0) + httpx (0.28.1),
 not a real problem today. If a future dependency bump turns this into a hard failure, that's the
 first place to look, not a mystery regression.
+
+## 2026-08-23 — Phase 5 (Authentication) built, and a real bug pytest alone couldn't catch
+
+Built per scope Prompt 6: `Company`/`Role`/`User` models (`UserRoles` as a plain SQLAlchemy
+`Table`, not a mapped class, since it's a pure M:N join with no extra columns), password hashing
+(`bcrypt`), centralized role-name constants (`security/roles.py`), JWT access+refresh tokens,
+`get_current_user`/`require_roles` dependencies, login/refresh/me routes, 12 new tests (18
+total). Login's error message is deliberately identical whether the email doesn't exist, the
+password is wrong, or the account is disabled - a standard OWASP-aligned tradeoff (never let a
+login response reveal which one was wrong) accepted over the UX benefit of a clearer "your
+account is disabled, contact IT" message. JWTs deliberately carry only `sub`/`type`, never
+`CompanyId` - `get_current_user` reloads the full user from the DB on every single request
+anyway (the same re-check-`IsActive`-every-request pattern that caught a real bug in
+PropertyManager), so a token-embedded `CompanyId` would be extra surface area for zero benefit.
+
+**The real finding this session**: `User.company: Mapped["Company"] = relationship(...)`
+references `Company` by string (standard SQLAlchemy pattern to avoid circular imports), but
+`app/models/user.py` only imports `Company` under `if TYPE_CHECKING` - which means nothing at
+*runtime* ever caused `Company` to be registered with SQLAlchemy's declarative registry, unless
+some other code happened to import it first. `pytest` never caught this: all 18 tests passed,
+because `tests/test_auth.py` imports `from app.models.company import Company` directly (needed
+for its own fixture, to look up the demo company's `CompanyId`), which incidentally registered
+`Company` before any query ran - accidentally masking a real bug. It only surfaced when a genuine
+standalone `uvicorn` server was started and hit with real `curl` requests: `POST /api/auth/login`
+against a nonexistent email returned a raw `500` (`sqlalchemy.exc.InvalidRequestError: ...
+failed to locate a name ('Company')`) instead of the expected `401`.
+
+**Fixed with `app/models/__init__.py`** importing every model class together (not relying on
+whatever happens to import them first), itself imported from `app/database/session.py` so it's
+guaranteed to run before any session/query is created, regardless of entry point.
+
+**Why this matters beyond this one bug**: it's concrete proof that "pytest passes" and "the
+feature actually works" are not the same claim in this codebase, specifically because a test
+file's own setup code can accidentally paper over a registration-order bug that real application
+code paths never trigger. **Every future session adding a new SQLAlchemy model must add it to
+`app/models/__init__.py`, and must verify with a real running server (not just pytest) before
+calling a model "done."** This is now the standing verification bar for backend work, not a
+one-off caution.
+
+**Demo users seeded** (`backend/scripts/seed_demo_users.py`, run via `python -m
+scripts.seed_demo_users` from `backend/`, idempotent): one user per role at Northgate Property
+Management (`admin@northgatepm.example`, `manager@`, `inspector@`, `maintenance@`, `viewer@`) +
+one Administrator at Bright Spaces Estates (`admin@brightspaces.example`), all password
+`Password123!`. Verified for real: logged in as the Northgate admin against a live server and
+got back real, working tokens. This closes the gap flagged since the Phase 2 seed-data work
+("`Users` deliberately NOT seeded... a fake placeholder hash would be worse than no demo users
+at all") - now that Phase 5 exists, the hashes are real.

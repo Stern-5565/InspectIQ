@@ -54,6 +54,38 @@ Current status. Overwrite/update this file at the end of every session or phase 
   - **Verified two ways**: `pytest` (in-process, via `TestClient`) AND a real `uvicorn` server
     started standalone and hit with actual `curl` over HTTP (`/api/health` and `/docs` both
     confirmed working), then cleanly stopped. Not just "tests pass" — the server genuinely runs.
+- **Phase 5 (Authentication) complete**, per scope Prompt 6:
+  - `app/models/company.py`, `role.py`, `user.py` (+ `UserRoles` as a plain `Table`, not a
+    mapped class — pure M:N join with no extra columns).
+  - `app/security/password.py` (`bcrypt`), `roles.py` (centralized role-name constants),
+    `jwt.py` (access + refresh tokens — deliberately carry only `sub`/`type`, never `CompanyId`,
+    since `get_current_user` always reloads the full user from the DB anyway),
+    `dependencies.py` (`get_current_user` re-checks `IsActive` from the DB on every request;
+    `require_roles(*names)` factory dependency).
+  - `app/repositories/user_repository.py`, `app/services/auth_service.py` (login, token issuance,
+    refresh — same generic "Incorrect email or password." message whether the email doesn't
+    exist, the password is wrong, or the account is disabled, to avoid account enumeration).
+  - `app/api/auth.py` — `POST /api/auth/login`, `POST /api/auth/refresh`, `GET /api/auth/me`.
+  - `backend/tests/test_auth.py` — 12 new tests (18 total now), all against the real DB with
+    throwaway users cleaned up in fixture teardown: login success/wrong-password/no-such-user/
+    disabled-account, `/me` with valid/missing/garbage token, **the deactivation-mid-session
+    case** (issue a token, deactivate the user, confirm the same token is rejected on the very
+    next request), refresh token success + rejecting an access token used as a refresh token,
+    and `require_roles` accept/reject.
+  - **A real bug was found and fixed only by testing with an actual running server, not by
+    pytest**: `User.company` relationship referenced `"Company"` by string, but nothing at
+    runtime ever imported `app.models.company` outside `TYPE_CHECKING` — every `pytest` test
+    passed anyway because `tests/test_auth.py` happens to import `Company` directly for its own
+    fixture, which incidentally registered it first and masked the bug. `POST /api/auth/login`
+    against a real running server returned a raw 500 for a nonexistent email. Fixed with
+    `app/models/__init__.py` importing every model together, itself imported from
+    `app/database/session.py` so it's guaranteed to run before any query. Full story in
+    `docs/AI_MEMORY.md`'s 2026-08-23 Phase 5 entry.
+  - `backend/scripts/seed_demo_users.py` — one-off script (run via
+    `python -m scripts.seed_demo_users` from `backend/`) using the app's real `hash_password`,
+    closing the gap flagged since Phase 2: 6 working demo logins now exist (5 Northgate — one
+    per role — + 1 Bright Spaces Administrator), all password `Password123!`. Verified for real:
+    logged in as `admin@northgatepm.example` against a live server and got back real tokens.
 
 ## Currently being worked on
 
@@ -85,12 +117,14 @@ documented, worth knowing for any future script against this schema):
 
 ## Known bugs
 
-None. The schema (tables, constraints, triggers, indexes, seed data, views, dashboard queries)
-and the FastAPI foundation (config, DB connection, error handling, logging, health check) are
-both implemented and verified against the real database and a real running server. One harmless
-warning worth knowing about (not a bug): `pytest` shows a `StarletteDeprecationWarning` about
-`httpx` vs a future `httpx2` package, from pairing a very new Starlette (1.6.0) with httpx
-0.28.1. Doesn't affect anything now; revisit if a future dependency bump makes it a hard error.
+None currently open. One real bug was found and fixed this session (see Phase 5 entry above):
+`User.company`'s string-referenced `"Company"` relationship wasn't resolvable at runtime because
+nothing imported `Company` outside `TYPE_CHECKING` — fixed via `app/models/__init__.py`. Every
+future model added must be imported there too, or the same class of bug will resurface silently
+(and `pytest` alone may not catch it, the way it didn't here — always also check with a real
+running server when adding a new model). One harmless warning worth knowing about (not a bug):
+`pytest` shows a `StarletteDeprecationWarning` about `httpx` vs a future `httpx2` package, from
+pairing a very new Starlette (1.6.0) with httpx 0.28.1. Doesn't affect anything now.
 
 ## Database structure
 
@@ -98,27 +132,28 @@ Fully implemented — see `docs/DATABASE.md` for the design, `database/` for the
 and verified against a real local `InspectIQDb`. Both structural requirements from the Phase 1
 sign-off are live and trigger-enforced. `RiskAssessments.RiskScore` is a verified-working
 `PERSISTED` computed column. The default inspection template (21 sections/102 questions) and
-global risk matrix are seeded; 2 demo companies with realistic property/unit data exist locally.
+global risk matrix are seeded; 2 demo companies with realistic property/unit data exist locally,
+now with 6 real, working demo logins (see Phase 5 above) — password `Password123!` for all.
 
 ## Coding standards
 
-Established and followed in the Phase 4 code: routes thin (see `app/api/health.py` — parses
-nothing, just calls the DB dependency and returns a schema), no business logic in routes yet
-since there isn't any yet, `app/schemas/` owns response shapes, `app/core/exceptions.py` owns
-error-to-HTTP-status mapping so services (once they exist) never construct `HTTPException`
-directly. Python 3.14, dependencies pinned with `>=` floors in `requirements.txt` (not exact
-pins) — see `backend/README.md` for setup/run/test instructions.
+Established and followed through Phase 5: routes thin (`app/api/auth.py`/`health.py` — parse
+input, call one service/dependency, return a schema), all business logic (credential checking,
+token issuance, the enumeration-avoidance decision) lives in `app/services/`, repositories
+(`app/repositories/user_repository.py`) do DB access only, `app/schemas/` owns response shapes
+and never exposes `PasswordHash`, `app/core/exceptions.py` owns error-to-HTTP-status mapping so
+no service constructs `HTTPException` directly, `app/security/roles.py` centralizes role-name
+constants (never raw string comparisons). Every new SQLAlchemy model must be added to
+`app/models/__init__.py` (see Known Bugs above for why). Python 3.14, dependencies pinned with
+`>=` floors in `requirements.txt` — see `backend/README.md` for setup/run/test instructions.
 
 ## Next tasks
 
-1. Commit this batch (backend/ foundation) to git.
-2. Phase 5 — Authentication (`prompts/backend_prompt.md` table, Prompt 6): `Users`/`Roles` models
-   in `app/models/`, password hashing (`bcrypt`, already installed) in `app/security/`, JWT
-   encode/decode using `JWT_SECRET_KEY` (already validated/guarded in config), login endpoint,
-   `get_current_user` dependency that re-checks `IsActive` every request (same pattern that
-   caught a real deactivation-timing bug in PropertyManager).
-3. **`Users` still needs seeding once real password hashing exists** — don't seed fake-hash demo
-   users before then (see `database/seed/13_SeedSampleData.sql`'s header comment).
+1. Commit this batch (auth module) to git.
+2. Phase 6 — Properties + Units (`prompts/backend_prompt.md`, Prompt 7): full CRUD, filtering,
+   pagination, `require_roles`-gated authorization (Managers/Admins manage, Inspectors view),
+   service + repository layers, tests. First module that will actually need `Property` models
+   and will exercise `require_roles` through a real protected route, not just directly.
 
 ## Files that require attention
 

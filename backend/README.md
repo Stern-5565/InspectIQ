@@ -29,6 +29,19 @@ Then visit `http://127.0.0.1:8000/api/health` (should return
 `{"status": "ok", "database": "connected"}`) or `http://127.0.0.1:8000/docs` for the
 auto-generated Swagger UI.
 
+### Demo logins
+
+Run once, after the database is set up:
+
+```bash
+python -m scripts.seed_demo_users
+```
+
+Creates one user per role at "Northgate Property Management" (`admin@northgatepm.example`,
+`manager@…`, `inspector@…`, `maintenance@…`, `viewer@…`) plus one Administrator at "Bright Spaces
+Estates" (`admin@brightspaces.example`) — password `Password123!` for all. Idempotent, local dev
+only (see the script's own header comment for why this isn't part of the SQL seed scripts).
+
 ## Run tests
 
 ```bash
