@@ -32,12 +32,32 @@ Current status. Overwrite/update this file at the end of every session or phase 
     rebuilt it from nothing via this one script, then re-verified every count (25 tables, 5
     roles, 21 sections/102 questions, 2 companies/4 properties, 4 risk levels, 43 indexes, 3
     triggers, 5 views). It genuinely works end-to-end, not just "each file worked in isolation."
+- **Phase 4 (FastAPI foundation) complete**, verified against the real `InspectIQDb` (not just
+  "the code looks right"):
+  - `backend/app/core/config.py` — `pydantic-settings`-based `Settings`, with the JWT-secret
+    placeholder/length guard and `APP_DEBUG=False` default built in from day one (per
+    `PROJECT_PLAN.md §12.2`, not retrofitted the way PropertyManager had to).
+  - `backend/app/database/session.py` — SQLAlchemy engine/session, ODBC connection string
+    builder supporting both Windows-trusted-connection (local dev) and SQL-auth-with-`Encrypt=yes`
+    (production) branches.
+  - `backend/app/models/base.py` — SQLAlchemy 2.0-style `DeclarativeBase`. No table models yet —
+    those get added module-by-module starting Phase 5/6, not all at once.
+  - `backend/app/core/exceptions.py` + handlers in `main.py` — domain exceptions
+    (`NotFoundError`/`ValidationError`/`UnauthorizedError`/`ForbiddenError`/`ConflictError`) with
+    HTTP status mapping; a catch-all handler that logs the real exception server-side but never
+    returns it to the client.
+  - `backend/app/core/logging_config.py`, `backend/app/api/health.py` — health check genuinely
+    queries the DB (`SELECT 1`), not a stub that always returns 200.
+  - `backend/tests/` — 6 tests, all passing against the real DB (no mocks): the health check
+    over a real DB round-trip, and 5 tests exercising the JWT-secret guard (placeholder/short
+    secret rejected outside dev, allowed in dev, real secret accepted, CORS origin parsing).
+  - **Verified two ways**: `pytest` (in-process, via `TestClient`) AND a real `uvicorn` server
+    started standalone and hit with actual `curl` over HTTP (`/api/health` and `/docs` both
+    confirmed working), then cleanly stopped. Not just "tests pass" — the server genuinely runs.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch to git is the next action, then Phase 2 is fully
-  closed and Phase 3/4 (which the scope's 20-phase list treats as blending into FastAPI
-  foundation work) is next.
+- Nothing in progress. Committing this batch to git is the next action.
 
 ## Important decisions
 
@@ -66,8 +86,11 @@ documented, worth knowing for any future script against this schema):
 ## Known bugs
 
 None. The schema (tables, constraints, triggers, indexes, seed data, views, dashboard queries)
-is fully implemented and verified — including a from-scratch rebuild via `00_RunAll.sql`. No
-application code exists yet.
+and the FastAPI foundation (config, DB connection, error handling, logging, health check) are
+both implemented and verified against the real database and a real running server. One harmless
+warning worth knowing about (not a bug): `pytest` shows a `StarletteDeprecationWarning` about
+`httpx` vs a future `httpx2` package, from pairing a very new Starlette (1.6.0) with httpx
+0.28.1. Doesn't affect anything now; revisit if a future dependency bump makes it a hard error.
 
 ## Database structure
 
@@ -79,17 +102,23 @@ global risk matrix are seeded; 2 demo companies with realistic property/unit dat
 
 ## Coding standards
 
-Not yet established in code — see `docs/PROJECT_PLAN.md §5–6` for the intended backend/frontend
-layering rules (routes thin, services own business logic, repositories own DB access).
+Established and followed in the Phase 4 code: routes thin (see `app/api/health.py` — parses
+nothing, just calls the DB dependency and returns a schema), no business logic in routes yet
+since there isn't any yet, `app/schemas/` owns response shapes, `app/core/exceptions.py` owns
+error-to-HTTP-status mapping so services (once they exist) never construct `HTTPException`
+directly. Python 3.14, dependencies pinned with `>=` floors in `requirements.txt` (not exact
+pins) — see `backend/README.md` for setup/run/test instructions.
 
 ## Next tasks
 
-1. Commit this batch (seed/views/reports/00_RunAll.sql) to git.
-2. Phase 4 — FastAPI foundation (`prompts/backend_prompt.md`, Prompt 5): app skeleton, config,
-   DB connection (SQLAlchemy models mapping to this exact schema), health-check endpoint.
-3. **`Users` still needs seeding once Phase 5 (Authentication) exists** and can produce a real
-   password hash — don't seed fake-hash demo users before then (see `13_SeedSampleData.sql`'s
-   header comment for the reasoning).
+1. Commit this batch (backend/ foundation) to git.
+2. Phase 5 — Authentication (`prompts/backend_prompt.md` table, Prompt 6): `Users`/`Roles` models
+   in `app/models/`, password hashing (`bcrypt`, already installed) in `app/security/`, JWT
+   encode/decode using `JWT_SECRET_KEY` (already validated/guarded in config), login endpoint,
+   `get_current_user` dependency that re-checks `IsActive` every request (same pattern that
+   caught a real deactivation-timing bug in PropertyManager).
+3. **`Users` still needs seeding once real password hashing exists** — don't seed fake-hash demo
+   users before then (see `database/seed/13_SeedSampleData.sql`'s header comment).
 
 ## Files that require attention
 

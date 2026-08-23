@@ -128,3 +128,35 @@ would have passed every individual-file test and only shown up on a true fresh r
    session settings as `RiskAssessments` does for its computed column - this wasn't obvious from
    the RiskAssessments-focused gotcha already documented above, and bit
    `13_SeedSampleData.sql`'s very first `Properties` INSERT.
+
+## 2026-08-23 — Phase 4 (FastAPI foundation) built and verified two ways
+
+Python 3.14.6 was already the only interpreter on this machine (via the `py` launcher) - checked
+before assuming an older version was needed, since 3.14 is recent enough that some C-extension
+packages could plausibly lack wheels yet. They didn't: fastapi, sqlalchemy, pyodbc, pydantic-core,
+bcrypt, greenlet all installed clean with `cp314` wheels, no compatibility issues.
+
+**The JWT-secret-placeholder guard and `APP_DEBUG=False` default (PROJECT_PLAN.md §12.2) were
+built into `config.py` from the start**, not retrofitted after a security audit the way
+PropertyManager's were - `Settings`'s `model_validator` refuses to construct if `APP_ENV` isn't
+`"development"` and `JWT_SECRET_KEY` is still the `.env.example` placeholder or under 32 chars.
+Verified with 4 real tests (`tests/test_config.py`), not just written and assumed correct -
+placeholder/short secret rejected outside dev, both allowed in dev, real secret accepted outside
+dev, CORS origin string parsing.
+
+**Verified two independent ways, not just "pytest passed"**: `pytest` (6/6 passing, in-process via
+`TestClient`) AND a real standalone `uvicorn` server started, hit with actual `curl` over HTTP
+(`/api/health` returned the correct JSON, `/docs` returned 200), then stopped. The health check
+genuinely executes `SELECT 1` against the real `InspectIQDb` on every call - it's not a stub that
+always returns 200 regardless of DB state.
+
+**Layering rules from PROJECT_PLAN.md §5 are already visible in the two files that exist**:
+`app/api/health.py` is intentionally thin (parses nothing, one DB call via a dependency, returns
+a schema); `app/core/exceptions.py` centralizes HTTP-status mapping so no future service will
+need to construct `HTTPException` directly. No models/repositories/services exist yet - Phase 5
+(Authentication) is what actually exercises those layers for the first time with `Users`/`Roles`.
+
+**Note for later**: a `StarletteDeprecationWarning` appears during test runs (`httpx` vs a future
+`httpx2` package) - a version-pairing artifact of very new Starlette (1.6.0) + httpx (0.28.1),
+not a real problem today. If a future dependency bump turns this into a hard failure, that's the
+first place to look, not a mystery regression.
