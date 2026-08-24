@@ -29,6 +29,7 @@ from app.models.property import Property
 from app.models.role import Role
 from app.models.unit import Unit
 from app.models.user import User, user_roles
+from app.models.vacant_unit_inspection import VacantUnitInspection
 
 __all__ = [
     "Base",
@@ -48,4 +49,5 @@ __all__ = [
     "Unit",
     "User",
     "user_roles",
+    "VacantUnitInspection",
 ]

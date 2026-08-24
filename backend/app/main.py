@@ -14,6 +14,7 @@ from app.api import (
     media,
     properties,
     units,
+    vacant_units,
 )
 from app.core.config import settings
 from app.core.exceptions import AppError
@@ -55,3 +56,4 @@ app.include_router(inspections.router, prefix="/api")
 app.include_router(media.router, prefix="/api")
 app.include_router(maintenance.router, prefix="/api")
 app.include_router(cleaning.router, prefix="/api")
+app.include_router(vacant_units.router, prefix="/api")

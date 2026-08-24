@@ -224,8 +224,9 @@ Current status. Overwrite/update this file at the end of every session or phase 
     module-public for this reuse). Caption-edit/delete are narrower still: uploader or
     Admin/Manager only. `SUPPORTED_ENTITY_TYPES` originally excluded MeterReading/
     MaintenanceIssue/RiskAssessment/CleaningInspection, whose own services didn't exist yet;
-    MaintenanceIssue (Phase 10) and CleaningInspection (Phase 11, see below) have since been
-    added — MeterReading/RiskAssessment are still deferred to Phases 13/14.
+    MaintenanceIssue (Phase 10), CleaningInspection (Phase 11), and VacantUnitInspection
+    (Phase 12, see below) have since been added — MeterReading/RiskAssessment are still
+    deferred to Phases 13/14.
   - `app/repositories/inspection_response_repository.py` gained
     `get_response_by_id_for_company` — the one function there that takes `company_id` directly
     (documented as a deliberate exception to the file's own "no company_id param" rule), needed
@@ -365,6 +366,62 @@ Current status. Overwrite/update this file at the end of every session or phase 
     uploaded via `EntityType=CleaningInspection` appeared in the generic media list → all test
     data (property, areas, inspection, responses, cleaning grade, media row and file) cleaned up
     afterward.
+- **Phase 12 (Vacant Unit Inspection) complete**, per scope §7. No new SQL —
+  `VacantUnitInspections` has existed since Phase 2.
+  - `app/models/vacant_unit_inspection.py` — added to `models/__init__.py` and sanity-queried
+    before any route was written. Every `BIT` column (`ElectricityOn`, `WaterOn`, etc.) is
+    nullable with no DB default — kept genuinely tri-state (`bool | None`, `None` = not
+    checked) through the ORM and Pydantic schemas rather than defaulting to `False`, which would
+    silently misreport "confirmed off" for something the inspector simply skipped.
+  - **Simplest authorization shape yet — a single tier, not two or three**: view (any company
+    member) · create/update (the parent `Inspection`'s own assigned inspector or Admin/Manager,
+    reusing `inspection_service.ensure_can_edit` directly, same as Phase 11's
+    `CleaningInspection`). No per-property config table was needed the way Cleaning needed
+    `CleaningAreas` (`Units` already exist from Phase 6), and the record itself has no
+    `Status`/`AssignedUserId` workflow columns at all — it's a one-time recorded finding, not
+    its own follow-up workflow. See `app/services/vacant_unit_service.py`'s module docstring.
+  - **Closed a second gap flagged since Phase 6** (`app/api/units.py`'s own docstring:
+    "realistically an Inspector doing a walkthrough is often the one who discovers a unit is now
+    vacant... that flow belongs to the Inspection engine... with its own permission story").
+    `create_vacant_unit_inspection` now calls `unit_service.update_unit_occupancy` directly
+    right after recording the finding, flipping the unit to `Vacant` — that service function has
+    NO permission check of its own (Units' standalone API gates occupancy changes to
+    Administrator/Manager only at the ROUTE level, not inside the service), so calling it here
+    — after this module's OWN `ensure_can_edit` check has already run — is exactly the "own
+    permission story" the Phase 6 comment anticipated, not a bypass. Confirmed live: an
+    Inspector (not Admin/Manager) recording a vacant-unit finding successfully flipped a real
+    demo unit's `OccupancyStatus`.
+  - Scope §7's "a maintenance issue should be creatable directly from any of these questions"
+    has no dedicated `VacantUnitInspectionId` FK on `MaintenanceIssues` (`docs/DATABASE.md`'s
+    ERD lists only `Unit`/`Inspection`/`InspectionResponse`) — satisfied by the EXISTING
+    `POST /api/maintenance-issues` accepting `PropertyId`/`UnitId`/`InspectionId` directly
+    (documented as a deliberate interpretive call in `vacant_unit_service.py`, not a gap). No
+    automatic MaintenanceIssue/CleaningInspection creation happens even when
+    `MaintenanceRequired`/`CleaningRequired` is flagged true — scope says "creatable," not
+    "created automatically."
+  - Added `VacantUnitInspection` to `media_service.py`'s supported entity types (scope §7 lists
+    Photos/Videos) — a plain top-level import, same as `CleaningInspection`; no circular
+    dependency on this side either.
+  - `app/api/vacant_units.py` — `POST/GET /api/inspections/{id}/vacant-unit-inspections`,
+    `PATCH /api/vacant-unit-inspections/{id}`.
+  - 7 new tests (92 total), all against the real DB: create-as-assigned-inspector (with the
+    occupancy-flip verified via a real `GET /api/units/{id}` call, and the nullable tri-state
+    fields checked to stay `None`, not `False`, when never supplied), a `UnitId` from another
+    property rejected 422, an unassigned inspector 403, a `Submitted` inspection 409,
+    cross-company 404, a partial `PATCH` proven to leave other fields untouched, and a photo
+    uploaded through the generic `/api/media` endpoint with `EntityType=VacantUnitInspection`.
+    One fixture (`occupied_unit_id`) deliberately mutates real seeded demo data (flips "Flat 1"
+    to test the occupancy side effect) and restores it to `Occupied` in teardown — the only test
+    fixture in this project that mutates shared seed data rather than only adding/removing its
+    own throwaway rows, called out explicitly in the fixture's own docstring.
+  - **Verified live**: a real Inspector recorded a vacant-unit finding on a real demo unit
+    (currently `Occupied`) → confirmed the response's nullable fields stayed genuinely `null`
+    for anything not supplied → confirmed the unit flipped to `Vacant` via a real `GET` →
+    confirmed a Bright Spaces admin got 404 on the list → uploaded a real photo via
+    `EntityType=VacantUnitInspection` → updated the record's `Notes` via `PATCH` → all of it
+    (inspection, its 102 snapshot responses, the vacant-unit record, the media row and file)
+    cleaned up afterward, including manually restoring the demo unit's `OccupancyStatus` back
+    to `Occupied`.
 
 ## Currently being worked on
 
@@ -440,30 +497,46 @@ must be explicitly closed — Starlette does not close it for you**, confirmed b
 `app/api/media.py`'s `_iter_and_close`. When adding a new polymorphic-media entity type
 (RiskAssessment/CleaningInspection/MeterReading remaining), add it to both `media_service.py`'s
 `_VIEW_CHECKS` and `_MUTATE_CHECKS` dicts and to `app/schemas/media_file.py`'s `ENTITY_TYPES`
-tuple — not just one of the three (MaintenanceIssue in Phase 10 is the reference example).
+tuple — not just one of the three (MaintenanceIssue in Phase 10 is the reference example;
+CleaningInspection/VacantUnitInspection in Phases 11/12 followed the same checklist).
 **When two services each need to call the other, use a function-local import on (at least) one
 side rather than restructuring the module boundary** — confirmed working, not just theoretical,
 by `media_service`↔`maintenance_service` in Phase 10 (see either file for the exact pattern and
 the comment explaining which side owns the local import and why). **But check each direction
 independently before reaching for that workaround** — Phase 11's `property_service`→
 `cleaning_service` call needed it (a real cycle, since `cleaning_service` imports
-`property_service`), while `media_service`→`cleaning_service` didn't (no cycle exists, since
-`cleaning_service` never needs `media_service`) — a plain top-level import was correct there,
-and using a local one anyway would just be needless caution copied from Phase 10 without
-re-checking it actually applies.
+`property_service`), while `media_service`→`cleaning_service` and `media_service`→
+`vacant_unit_service` (Phase 12) didn't (no cycle exists on either, since neither service ever
+needs `media_service`) — a plain top-level import was correct both times, and using a local one
+anyway would just be needless caution copied from Phase 10 without re-checking it actually
+applies. **A service function with no permission check of its own (e.g.
+`unit_service.update_unit_occupancy`, gated only at its own route's level) can be called
+directly from another module's already-authorized service function to give that action a
+different, narrower "own permission story"** — confirmed twice now: Phase 11's property-creation
+auto-seed and Phase 12's inspector-triggered occupancy flip both do exactly this, each
+anticipated years earlier (in comments, not just in hindsight) as the deliberate reason a
+standalone API route's role gate doesn't need to be the ONLY way to reach that state change.
 
 ## Next tasks
 
-1. Commit this batch (Communal Cleaning Grading) to git.
-2. Phase 12 — Vacant Unit Inspection (`prompts/backend_prompt.md`, Prompt 13):
-   `VacantUnitInspections` model (table already exists, Phase 2 — its own table, not a generic
-   `InspectionResponse`, since scope §13 needs history without overwriting the unit's current
-   status and the field set — electricity/water/heating on/off etc. — doesn't fit the generic
-   Yes/No/Text/Number shape, per `docs/DATABASE.md`). Likely follows the Phase 11 shape (tied to
-   a real `Inspection`, graded/checked by the assigned inspector or Admin/Manager) more than
-   Maintenance's three-tier one — check `docs/DATABASE.md`'s `VacantUnitInspections` entry and
-   scope §13 in full before assuming, the same way each prior phase re-derived its own shape
-   instead of copying the previous module's by default.
+1. Commit this batch (Vacant Unit Inspection) to git.
+2. Phase 13 — Risk Assessments (`prompts/backend_prompt.md`, Prompt 14; scope §19):
+   `RiskAssessments`/`RiskMatrixLevels` models (tables already exist, Phase 2). The one
+   structural guarantee already built into the schema: `RiskAssessments.RiskScore` is a real SQL
+   Server `PERSISTED` computed column (`Likelihood * Severity`), so a client-supplied score is
+   already structurally impossible — no app-layer validation can or should try to "protect"
+   that column, only read it back after insert. `RiskLevel` is a write-time snapshot from
+   `RiskMatrixLevels` (same historical-accuracy principle as `InspectionResponses`' snapshot
+   columns, §13.1), not a live join - thresholds can change later without reclassifying old
+   assessments. `RiskMatrixLevels` follows the same "global default + per-company override"
+   isolation pattern as `InspectionTemplates` (`CompanyId IS NULL OR CompanyId = @company_id`).
+   `RiskAssessments` can originate from `Property`/`Inspection`/`InspectionResponse`/
+   `MaintenanceIssue` (all nullable FKs, docs/DATABASE.md's ERD) - re-derive the authorization
+   shape from what this module actually represents rather than assuming it matches Phase 10, 11,
+   or 12 by default, the same standing practice every phase since Phase 10 has followed. Add
+   `EntityType="RiskAssessment"` to `media_service.py` once this phase's service exists (scope
+   §19 lists "Pictures" as a field) - check both import directions independently before deciding
+   whether a local-import workaround is actually needed here, per the note above.
 
 ## Files that require attention
 

@@ -624,3 +624,91 @@ the Admin-override path to move the grade to `Completed` → a real photo upload
 auto-seeded areas, inspection, its 102 snapshot responses, the cleaning grade, the media row and
 its file on disk) cleaned up afterward, using the same `SET ANSI_NULLS ON`/`SET QUOTED_IDENTIFIER
 ON` preamble every hand-written script against this schema has needed since Phase 2.
+
+## 2026-08-24 — Phase 12 (Vacant Unit Inspection) built, closed a Phase-6-flagged gap
+
+Built the vacant-unit module per scope §7. `VacantUnitInspections` was already a real table
+since Phase 2 (`database/tables/04_InspectionTables.sql`), so like every phase since 9, this is
+entirely application code - no new SQL.
+
+**A single authorization tier - the simplest of any module so far, and worth naming as its own
+category rather than just "smaller Cleaning."** View: any company member. Mutate: the parent
+`Inspection`'s own assigned inspector or Admin/Manager, reusing `inspection_service.
+ensure_can_edit` directly, no independent carve-out - identical in shape to Phase 11's
+`CleaningInspection`. What makes this simpler than even Cleaning, not just simpler than
+Maintenance: there's no analogous "config table" the way `CleaningAreas` exists for Cleaning
+(`Units` already exist as first-class entities from Phase 6, nothing new needed to enumerate
+"what can be vacant"), and the record itself carries no `Status`/`AssignedUserId` at all - no
+workflow columns exist on `VacantUnitInspections` in the schema, because it isn't its own
+workflow. It's a one-time recorded finding; any follow-up work is scope's own explicit "creatable
+directly from any of these questions," which routes into MaintenanceIssues/CleaningInspections as
+their own separate records, not a status this table tracks itself.
+
+**Closed a second gap flagged in an earlier phase's own comments, not found fresh this
+session.** `app/api/units.py`'s docstring has said, since Phase 6: "realistically an Inspector
+doing a walkthrough is often the one who discovers a unit is now vacant - that flow belongs to
+the Inspection engine (Phase 8), which will call into unit occupancy updates through its own
+service with its own permission story, not through this standalone API. Revisit if Phase 8
+needs a different answer here." Phase 8 didn't touch it (it was scoped to the checklist engine,
+not vacant units specifically) - Phase 12 is the actual right moment. The mechanism: `unit_
+service.update_unit_occupancy` has NO permission check inside itself - Units' standalone API
+gates occupancy changes to Administrator/Manager only entirely at the ROUTE level in
+`app/api/units.py` (`_manage_units = require_roles(...)` wraps the endpoint, not the service
+function). `vacant_unit_service.create_vacant_unit_inspection` calls that same service function
+directly, AFTER its own `ensure_can_edit` check has already run - meaning an Inspector (who
+could never hit `PATCH /api/units/{id}/occupancy` directly) can still flip a unit to `Vacant`
+through this narrower, inspection-scoped path, exactly as the three-phases-old comment
+anticipated. Confirmed for real, not just by re-reading the comment: a live Inspector login
+(explicitly NOT Admin/Manager) recorded a vacant-unit finding on a real demo unit and its
+`OccupancyStatus` genuinely flipped to `Vacant`, checked via a separate real `GET` call
+afterward. This is the second time in two phases a service function with no permission check of
+its own (the first was `cleaning_service.seed_default_areas_for_property`, called from
+`property_service`, though that one needed no check at all rather than a narrower one) has been
+deliberately reused by a different, better-scoped caller to give an action its own permission
+story - worth treating as a recognized pattern in this codebase now, not a one-off trick.
+
+**Every `BIT` column on `VacantUnitInspections` is nullable with no DB default - genuinely
+tri-state, and this was deliberately preserved end-to-end rather than collapsed to a boolean.**
+Unlike `MaintenanceIssues.CleaningRequired`/`Urgent` (which default to `0` at the DB layer, so
+`False` there really does mean "confirmed no"), `NULL` here means "the inspector didn't check
+this," a materially different fact than "checked and it's fine." The model
+(`app/models/vacant_unit_inspection.py`), both Pydantic schemas, and the tests all keep this
+distinction explicit - a test asserts a never-supplied field comes back `None` in the API
+response, not silently coerced to `false`.
+
+**Scope §7's "a maintenance issue should be creatable directly from any of these questions" has
+no supporting FK on the actual schema** - `docs/DATABASE.md`'s ERD lists `MaintenanceIssue N──0/1
+Unit, Inspection, InspectionResponse` only; no `VacantUnitInspectionId` column exists or was ever
+designed. Rather than adding one now (a real schema change this late, for a linkage the existing
+`PropertyId`/`UnitId`/`InspectionId` fields on `MaintenanceIssueCreate` already cover in
+practice, since a vacant-unit finding has all three in hand), this is satisfied by the EXISTING
+`POST /api/maintenance-issues` endpoint - documented as a deliberate interpretive call in
+`vacant_unit_service.py`'s own module docstring, the same kind of explicit "here's what this
+means and why" note the project has used for every ambiguous scope-vs-schema gap since Phase 6's
+"permission to inspect" call. No automatic MaintenanceIssue/CleaningInspection gets created even
+when `MaintenanceRequired`/`CleaningRequired` is flagged true on a vacant-unit record - scope
+says "creatable," a client-triggered action, not "created," an automatic side effect, and
+inventing that automation would be solving a problem scope didn't actually pose.
+
+7 new tests (92 total), all against the real DB: create-as-assigned-inspector with the real
+occupancy flip verified via a genuine `GET /api/units/{id}` call (not just asserted from the
+create response) and the nullable fields checked to stay `None` rather than `False` when never
+supplied, a `UnitId` from a different property rejected 422, an unassigned inspector 403, a
+`Submitted` inspection 409, cross-company 404 on the list, a partial `PATCH` proven to leave
+other fields untouched, and a photo uploaded through the generic `/api/media` endpoint with
+`EntityType=VacantUnitInspection`. One fixture (`occupied_unit_id`) is unusual for this project:
+it deliberately mutates real seeded demo data (flips "Flat 1" to `Vacant` so there's something
+real for the create action to flip) and restores it to `Occupied` in its own teardown - called
+out explicitly in its docstring as the only fixture in this test suite that mutates shared seed
+data rather than only adding/removing its own throwaway rows, so a future session doesn't copy
+this pattern by default for something that doesn't need it.
+
+**Verified live**: a real Inspector (not Admin/Manager) recorded a vacant-unit finding on a real
+demo unit that started `Occupied` → confirmed the response's never-supplied fields came back
+genuinely `null` → confirmed the unit's `OccupancyStatus` had actually flipped to `Vacant` via a
+separate `GET` → a Bright Spaces admin got 404 on the list → a real photo uploaded via
+`EntityType=VacantUnitInspection` appeared in the generic media list → the record's `Notes` was
+updated via `PATCH` → everything (the inspection and its 102 snapshot responses, the vacant-unit
+record, the media row and file) cleaned up afterward, including manually restoring the demo
+unit's `OccupancyStatus` back to `Occupied` so the shared seed data wasn't left mutated for the
+next session.

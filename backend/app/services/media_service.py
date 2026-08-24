@@ -3,14 +3,16 @@ storage abstraction and PROJECT_PLAN.md §8 for the architecture this implements
 
 SUPPORTED_ENTITY_TYPES is deliberately narrower than scope §20's full list (which also names
 MeterReading, RiskAssessment). Those tables exist in the DB (Phase 2), but their own modules/
-services don't exist yet (Phases 13/14) - and §8's core rule is "file access authorization
+services don't exist yet (Phase 13/14) - and §8's core rule is "file access authorization
 mirrors the parent entity's authorization," which is impossible to enforce for a parent entity
 with no service to ask. Add each one to _VIEW_CHECKS/_MUTATE_CHECKS (and this tuple) as its own
 phase lands, the same incremental pattern Phase 7's read-only Templates API and Phase 8's engine
-already followed. MaintenanceIssue (Phase 10) and CleaningInspection (Phase 11) were added the
-same way - CleaningInspection's resolver is a plain top-level import (unlike MaintenanceIssue's
-local-import workaround below), since cleaning_service never needs to import media_service back:
-there's no real circular dependency to avoid here, only Maintenance actually has one.
+already followed. MaintenanceIssue (Phase 10), CleaningInspection (Phase 11), and
+VacantUnitInspection (Phase 12) were added the same way - CleaningInspection/
+VacantUnitInspection's resolvers are plain top-level imports (unlike MaintenanceIssue's
+local-import workaround below), since neither cleaning_service nor vacant_unit_service ever
+needs to import media_service back: there's no real circular dependency to avoid on their side,
+only Maintenance actually has one.
 
 Two authorization levels per entity type, not one:
 - View (list/download): can the user see the PARENT entity at all? Reuses each parent module's
@@ -39,7 +41,13 @@ from app.repositories import inspection_response_repository as response_repo
 from app.repositories import media_file_repository as repo
 from app.schemas.media_file import MediaFileUpdate
 from app.security import roles
-from app.services import cleaning_service, inspection_service, property_service, unit_service
+from app.services import (
+    cleaning_service,
+    inspection_service,
+    property_service,
+    unit_service,
+    vacant_unit_service,
+)
 from app.services.media_storage import IMediaStorageService, get_storage_service
 
 SUPPORTED_ENTITY_TYPES = (
@@ -49,6 +57,7 @@ SUPPORTED_ENTITY_TYPES = (
     "InspectionResponse",
     "MaintenanceIssue",
     "CleaningInspection",
+    "VacantUnitInspection",
 )
 
 _IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
@@ -118,6 +127,16 @@ def _mutate_cleaning_inspection(db: Session, current_user: User, entity_id: int)
     inspection_service.ensure_can_edit(current_user, inspection)
 
 
+def _view_vacant_unit_inspection(db: Session, current_user: User, entity_id: int) -> None:
+    vacant_unit_service.get_vacant_unit_inspection(db, current_user, entity_id)
+
+
+def _mutate_vacant_unit_inspection(db: Session, current_user: User, entity_id: int) -> None:
+    record = vacant_unit_service.get_vacant_unit_inspection(db, current_user, entity_id)
+    inspection = inspection_service.get_inspection(db, current_user, record.InspectionId)
+    inspection_service.ensure_can_edit(current_user, inspection)
+
+
 _VIEW_CHECKS = {
     "Property": _view_property,
     "Unit": _view_unit,
@@ -125,6 +144,7 @@ _VIEW_CHECKS = {
     "InspectionResponse": _view_inspection_response,
     "MaintenanceIssue": _view_maintenance_issue,
     "CleaningInspection": _view_cleaning_inspection,
+    "VacantUnitInspection": _view_vacant_unit_inspection,
 }
 
 _MUTATE_CHECKS = {
@@ -134,6 +154,7 @@ _MUTATE_CHECKS = {
     "InspectionResponse": _mutate_inspection_response,
     "MaintenanceIssue": _mutate_maintenance_issue,
     "CleaningInspection": _mutate_cleaning_inspection,
+    "VacantUnitInspection": _mutate_vacant_unit_inspection,
 }
 
 
