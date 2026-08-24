@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
-from app.api import auth, health, inspection_templates, inspections, media, properties, units
+from app.api import auth, health, inspection_templates, inspections, maintenance, media, properties, units
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging_config import configure_logging
@@ -43,3 +43,4 @@ app.include_router(units.router, prefix="/api")
 app.include_router(inspection_templates.router, prefix="/api")
 app.include_router(inspections.router, prefix="/api")
 app.include_router(media.router, prefix="/api")
+app.include_router(maintenance.router, prefix="/api")

@@ -43,3 +43,42 @@ class OccupancyStatus(str, Enum):
     UNDER_REFURBISHMENT = "UnderRefurbishment"
     UNAVAILABLE = "Unavailable"
     UNKNOWN = "Unknown"
+
+
+# Named MaintenanceX rather than bare X (unlike PropertyType/PropertyStatus above) precisely so
+# the schema field name (Category/Priority, matching the DB column) never collides with the
+# enum's own class name - sidesteps the Phase 6 Python 3.14 lazy-annotation gotcha
+# (schemas/property.py's header comment) at the naming level instead of needing an aliased
+# import in every schema file that uses these.
+class MaintenanceCategory(str, Enum):
+    ELECTRICAL = "Electrical"
+    PLUMBING = "Plumbing"
+    HEATING = "Heating"
+    FIRE_SAFETY = "FireSafety"
+    EMERGENCY_LIGHTING = "EmergencyLighting"
+    CLEANING = "Cleaning"
+    GARDEN = "Garden"
+    STRUCTURAL = "Structural"
+    DOORS_WINDOWS = "DoorsWindows"
+    PEST_CONTROL = "PestControl"
+    DECORATION = "Decoration"
+    APPLIANCE = "Appliance"
+    SECURITY = "Security"
+    OTHER = "Other"
+
+
+class MaintenancePriority(str, Enum):
+    LOW = "Low"
+    MEDIUM = "Medium"
+    HIGH = "High"
+    URGENT = "Urgent"
+    EMERGENCY = "Emergency"
+
+
+class MaintenanceIssueStatus(str, Enum):
+    OPEN = "Open"
+    ASSIGNED = "Assigned"
+    IN_PROGRESS = "InProgress"
+    WAITING = "Waiting"
+    COMPLETED = "Completed"
+    CLOSED = "Closed"

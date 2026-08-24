@@ -140,7 +140,10 @@ def test_upload_for_property_in_another_company_returns_404(
 def test_upload_with_unsupported_entity_type_returns_422(
     client: TestClient, northgate_inspector, northgate_property_id: int
 ) -> None:
-    response = _upload(client, auth_headers(client, northgate_inspector.Email), "MaintenanceIssue", 1)
+    # RiskAssessment's own service doesn't exist yet (Phase 13) - still a genuinely unsupported
+    # EntityType. MaintenanceIssue stopped being a valid example of this the moment Phase 10
+    # added it to media_service.SUPPORTED_ENTITY_TYPES.
+    response = _upload(client, auth_headers(client, northgate_inspector.Email), "RiskAssessment", 1)
     assert response.status_code == 422
 
 

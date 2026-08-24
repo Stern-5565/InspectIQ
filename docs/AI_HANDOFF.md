@@ -222,10 +222,10 @@ Current status. Overwrite/update this file at the end of every session or phase 
     Inspection/InspectionResponse reuses `inspection_service.ensure_can_edit` — the Phase 8
     assigned-inspector-or-Admin/Manager rule (renamed from `_ensure_can_edit`, made
     module-public for this reuse). Caption-edit/delete are narrower still: uploader or
-    Admin/Manager only. `SUPPORTED_ENTITY_TYPES = ("Property", "Unit", "Inspection",
-    "InspectionResponse")` — deliberately excludes MeterReading/MaintenanceIssue/
-    RiskAssessment/CleaningInspection, whose own services don't exist yet (Phases 10/11/13/14);
-    add each to `_VIEW_CHECKS`/`_MUTATE_CHECKS` as its phase lands.
+    Admin/Manager only. `SUPPORTED_ENTITY_TYPES` originally excluded MeterReading/
+    MaintenanceIssue/RiskAssessment/CleaningInspection, whose own services didn't exist yet;
+    MaintenanceIssue was added in Phase 10 (see below) — MeterReading/RiskAssessment/
+    CleaningInspection are still deferred to Phases 11/13/14.
   - `app/repositories/inspection_response_repository.py` gained
     `get_response_by_id_for_company` — the one function there that takes `company_id` directly
     (documented as a deliberate exception to the file's own "no company_id param" rule), needed
@@ -250,6 +250,60 @@ Current status. Overwrite/update this file at the end of every session or phase 
   - **Verified live**: real Inspector login → real property → upload via curl → download
     (byte-for-byte match) → list → cross-company 404 (Bright Spaces admin) → delete → confirmed
     gone (404) → confirmed no orphaned file left in `backend/uploads/`.
+- **Phase 10 (Maintenance Issue System) complete**, per scope §17/§18. No new SQL —
+  `MaintenanceIssues`/`MaintenanceUpdates` have existed since Phase 2.
+  - `app/models/maintenance_issue.py`, `maintenance_update.py` — added to `models/__init__.py`
+    and sanity-queried before any route was written (the now-standing habit since Phase 5).
+  - **Three authorization tiers, not two** — see `app/services/maintenance_service.py`'s module
+    docstring for the full reasoning: view (any company member) · general field edits + assign
+    (Administrator/Manager only, gated at the ROUTE level via `require_roles`, same as
+    Properties/Units) · status/notes/photos (the issue's own `AssignedUserId`, or
+    Administrator/Manager — reuses Phase 8's `ensure_can_edit` shape, gated at the SERVICE level
+    because the assignee can hold any role, so a route-level role list can't express it).
+  - `create_issue` handles both entry points from one endpoint: a manual `PropertyId`, or an
+    `InspectionResponseId`/`InspectionId` that the service resolves the Property from itself
+    (scope §17: "automatically copying Property, Inspection..." — the client-supplied
+    `PropertyId` is ignored/overridden whenever a response/inspection is linked, never trusted
+    alongside one). `Location` auto-fills from the response's `SectionNameSnapshot`/
+    `QuestionTextSnapshot` when not explicitly supplied — no separate section/question columns
+    were added to `MaintenanceIssues` itself, since `InspectionResponseId` is already a stable
+    FK back to the authoritative snapshot.
+  - **A genuine two-service circular dependency, resolved with local imports on both sides**:
+    `maintenance_service.upload_photo` needs `media_service.upload_media` (to reuse validation/
+    storage without duplicating it), and `media_service`'s own entity-type dispatch for
+    `EntityType="MaintenanceIssue"` needs to call BACK into `maintenance_service.get_issue`/
+    `ensure_can_edit`. Both sides use a function-local `from app.services import ...` instead of
+    a top-level import — documented in both files at the exact lines involved. Confirmed working
+    (not just "should work") both via `app.main` importing cleanly and via a live curl upload
+    that produced a real `MediaFile` row.
+  - `app/repositories/inspection_response_repository.py`'s `get_response_by_id_for_company`
+    (added in Phase 9) got its second caller here — proof it generalizes, not a one-off.
+  - `app/api/maintenance.py` — `POST/GET /api/maintenance-issues`, `GET /{id}`,
+    `GET /{id}/timeline`, `PATCH /{id}` (general edit, Admin/Manager), `PATCH /{id}/assign`
+    (Admin/Manager — auto-advances `Open` → `Assigned`, never moves a further-along issue
+    backwards on reassignment), `PATCH /{id}/status` (assigned-or-Admin/Manager; sets
+    `CompletedDate` once on first entering `Completed`; rejects a no-op transition to the same
+    status with 422), `POST /{id}/notes`, `POST /{id}/photos` (writes a `PhotoUploaded` timeline
+    entry after delegating the actual upload to `media_service`).
+  - 14 new tests (73 total), all against the real DB with issues/updates/media files cleaned up
+    per-test (including the file on disk): manual create, role-gated create (Maintenance
+    blocked), cross-company 404 on create, missing-Property-and-Inspection 422, create-from-
+    response derives Property/Inspection/Location correctly, assignment auto-sets
+    `AssignedUserId` and starting status, cross-company get 404, general-edit Admin-only (403
+    for the assigned Maintenance worker), assign moves Open→Assigned with a timeline entry,
+    status update by the assigned user succeeds while an unassigned user gets 403 and a
+    same-status transition gets 422, `Completed` sets `CompletedDate`, note-adding writes a
+    `Comment` timeline entry, photo upload writes both a `MediaFile` and a `PhotoUploaded`
+    timeline entry (checked via both the maintenance detail response AND the generic
+    `/api/media` list, proving the cross-service integration end-to-end).
+  - **Verified live**: real Inspector login created an issue → real Admin assigned it to the
+    Maintenance demo user (Open → Assigned) → the unassigned Inspector got 403 on a status
+    update, the assigned Maintenance worker got 200 (Assigned → InProgress) → a note was added →
+    a real photo was uploaded via curl and appeared both in the issue's timeline (`PhotoUploaded`)
+    and in `GET /api/media?entity_type=MaintenanceIssue...` → Bright Spaces admin got 404 on the
+    issue → all test data cleaned up from the DB and `backend/uploads/` afterward (confirming the
+    `SET ANSI_NULLS ON`/`SET QUOTED_IDENTIFIER ON` gotcha from Phase 2 still applies to any
+    hand-written cleanup script touching `MaintenanceIssues`, which carries a filtered index).
 
 ## Currently being worked on
 
@@ -323,20 +377,25 @@ dependencies pinned with `>=` floors in `requirements.txt` — see `backend/READ
 must be explicitly closed — Starlette does not close it for you**, confirmed by a real Windows
 `PermissionError` when Phase 9's first `/download` implementation leaked a handle; see
 `app/api/media.py`'s `_iter_and_close`. When adding a new polymorphic-media entity type
-(MaintenanceIssue/RiskAssessment/CleaningInspection/MeterReading), add it to both
-`media_service.py`'s `_VIEW_CHECKS` and `_MUTATE_CHECKS` dicts and to
-`app/schemas/media_file.py`'s `ENTITY_TYPES` tuple — not just one of the three.
+(RiskAssessment/CleaningInspection/MeterReading remaining), add it to both `media_service.py`'s
+`_VIEW_CHECKS` and `_MUTATE_CHECKS` dicts and to `app/schemas/media_file.py`'s `ENTITY_TYPES`
+tuple — not just one of the three (MaintenanceIssue in Phase 10 is the reference example).
+**When two services each need to call the other, use a function-local import on (at least) one
+side rather than restructuring the module boundary** — confirmed working, not just theoretical,
+by `media_service`↔`maintenance_service` in Phase 10 (see either file for the exact pattern and
+the comment explaining which side owns the local import and why).
 
 ## Next tasks
 
-1. Commit this batch (Photo & Video Uploads) to git.
-2. Phase 10 — Maintenance Issue System (`prompts/backend_prompt.md`, Prompt 11): `MaintenanceIssues`/
-   `MaintenanceUpdates` models (tables already exist, Phase 2), creating an issue from a failed
-   inspection response (scope §17 — "Failures should allow the inspector to immediately create a
-   Maintenance Issue"), status/history tracking, before/after photos via the Phase 9 media API
-   (`EntityType="MaintenanceIssue"` needs adding to `media_service.py`'s `_VIEW_CHECKS`/
-   `_MUTATE_CHECKS` once this phase's service exists — deliberately deferred until now, see
-   `docs/AI_MEMORY.md`'s 2026-08-24 entry).
+1. Commit this batch (Maintenance Issue System) to git.
+2. Phase 11 — Communal Cleaning Grading (`prompts/backend_prompt.md`, Prompt 12):
+   `CleaningAreas`/`CleaningInspections` models (tables already exist, Phase 2 — per-property
+   configurable area list, not a fixed global enum, see `docs/DATABASE.md`'s `CleaningAreas`
+   entry), grading (A–E per scope §16), flagging cleaning-required/urgent, optional assignment.
+   `EntityType="CleaningInspection"` should be added to `media_service.py`'s `_VIEW_CHECKS`/
+   `_MUTATE_CHECKS` once this phase's service exists, following the exact Phase 10
+   `MaintenanceIssue` pattern (including its local-import workaround if this service also needs
+   to call into `media_service` directly, e.g. for a completion photo).
 
 ## Files that require attention
 

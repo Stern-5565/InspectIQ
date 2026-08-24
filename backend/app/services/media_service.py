@@ -2,12 +2,12 @@
 storage abstraction and PROJECT_PLAN.md §8 for the architecture this implements.
 
 SUPPORTED_ENTITY_TYPES is deliberately narrower than scope §20's full list (which also names
-MeterReading, MaintenanceIssue, RiskAssessment, CleaningInspection). Those tables exist in the
-DB (Phase 2), but their own modules/services don't exist yet (Phases 10/11/13/14) - and §8's
-core rule is "file access authorization mirrors the parent entity's authorization," which is
-impossible to enforce for a parent entity with no service to ask. Add each one to
-_VIEW_CHECKS/_MUTATE_CHECKS (and this tuple) as its own phase lands, the same incremental
-pattern Phase 7's read-only Templates API and Phase 8's engine already followed.
+MeterReading, RiskAssessment, CleaningInspection). Those tables exist in the DB (Phase 2), but
+their own modules/services don't exist yet (Phases 11/13/14) - and §8's core rule is "file
+access authorization mirrors the parent entity's authorization," which is impossible to enforce
+for a parent entity with no service to ask. Add each one to _VIEW_CHECKS/_MUTATE_CHECKS (and
+this tuple) as its own phase lands, the same incremental pattern Phase 7's read-only Templates
+API and Phase 8's engine already followed. MaintenanceIssue was added in Phase 10 the same way.
 
 Two authorization levels per entity type, not one:
 - View (list/download): can the user see the PARENT entity at all? Reuses each parent module's
@@ -39,7 +39,7 @@ from app.security import roles
 from app.services import inspection_service, property_service, unit_service
 from app.services.media_storage import IMediaStorageService, get_storage_service
 
-SUPPORTED_ENTITY_TYPES = ("Property", "Unit", "Inspection", "InspectionResponse")
+SUPPORTED_ENTITY_TYPES = ("Property", "Unit", "Inspection", "InspectionResponse", "MaintenanceIssue")
 
 _IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
 _VIDEO_CONTENT_TYPES = {"video/mp4", "video/quicktime", "video/webm"}
@@ -82,11 +82,28 @@ def _mutate_inspection_response(db: Session, current_user: User, entity_id: int)
     inspection_service.ensure_can_edit(current_user, inspection)
 
 
+def _view_maintenance_issue(db: Session, current_user: User, entity_id: int) -> None:
+    # Local import: maintenance_service.upload_photo calls INTO media_service.upload_media,
+    # which reaches this function - a top-level import either direction would be circular. See
+    # maintenance_service.py's upload_photo for the matching local import on that side.
+    from app.services import maintenance_service
+
+    maintenance_service.get_issue(db, current_user, entity_id)
+
+
+def _mutate_maintenance_issue(db: Session, current_user: User, entity_id: int) -> None:
+    from app.services import maintenance_service
+
+    issue = maintenance_service.get_issue(db, current_user, entity_id)
+    maintenance_service.ensure_can_edit(current_user, issue)
+
+
 _VIEW_CHECKS = {
     "Property": _view_property,
     "Unit": _view_unit,
     "Inspection": _view_inspection,
     "InspectionResponse": _view_inspection_response,
+    "MaintenanceIssue": _view_maintenance_issue,
 }
 
 _MUTATE_CHECKS = {
@@ -94,6 +111,7 @@ _MUTATE_CHECKS = {
     "Unit": _view_unit,
     "Inspection": _mutate_inspection,
     "InspectionResponse": _mutate_inspection_response,
+    "MaintenanceIssue": _mutate_maintenance_issue,
 }
 
 

@@ -429,3 +429,99 @@ removes both the row and the file (checked with `Path.exists()`, not just assert
 non-uploader non-admin 403, upload to an `Inspection` by an unassigned Inspector 403 (reusing
 `ensure_can_edit`, proving the reuse actually works end-to-end and not just at the import level),
 caption update by the uploader.
+
+## 2026-08-24 — Phase 10 (Maintenance Issue System) built, first real service-to-service cycle
+
+Built the maintenance module per scope §17/§18. `MaintenanceIssues`/`MaintenanceUpdates` were
+already real tables since Phase 2 (`database/tables/05_MaintenanceTables.sql`), so like Phase 9,
+this is entirely application code - no new SQL.
+
+**Three authorization tiers in one module - the third distinct shape this project has needed,
+each for a different reason, and each documented as deliberate rather than copied by default.**
+Properties/Units/Templates: any company member views, Admin/Manager mutates. Inspections
+(Phase 8): any company member views, but mutate narrows to the assigned inspector or Admin/
+Manager - one person's active work. MaintenanceIssues needed BOTH ideas at once, split by which
+kind of action it is: general field edits (Title/Category/Priority/DueDate/Notes) and deciding
+who's assigned are management decisions - Admin/Manager only, gated at the ROUTE level exactly
+like Properties/Units. But actually DOING the work - changing status, adding a note, uploading a
+photo - is the Inspections shape: the issue's own `AssignedUserId`, or Admin/Manager, reusing
+`ensure_can_edit` almost verbatim from `inspection_service.py`. The one real wrinkle: unlike an
+Inspection's `InspectorUserId` (always self-assigned, always one of the Inspector-tier roles),
+`MaintenanceIssue.AssignedUserId` is set by an Admin/Manager and can point at ANY company user
+regardless of role - scope doesn't restrict assignment to people with the "Maintenance" role
+specifically. That's exactly why status/notes/photos are gated at the SERVICE level
+(`ensure_can_edit`) rather than a route-level `require_roles` list the way general-edit/assign
+are: a role-based gate can't express "whoever this issue happens to be assigned to," only
+`ensure_can_edit`'s live lookup of `issue.AssignedUserId` can.
+
+**`create_issue` deliberately handles two entry points through one endpoint, not two.** A manual
+issue supplies `PropertyId` directly. An issue "created from any inspection question" (scope
+§17's own phrasing) supplies `InspectionResponseId` instead, and the service resolves
+Property/Inspection from the response itself - critically, a client-supplied `PropertyId`
+alongside a response is ignored/overridden, never trusted, because a mismatched pair (this
+photo is really from property 4, but claims to be about property 7's response) would be a real
+cross-tenant data-integrity bug, not just sloppy input. `Location` auto-fills from the
+response's `SectionNameSnapshot`/`QuestionTextSnapshot` (scope's "automatically copying...
+Inspection section, Checklist item") as plain text rather than as new duplicate columns on
+`MaintenanceIssues` - `InspectionResponseId` is already a stable FK back to the authoritative
+snapshot for anything that needs it structurally (e.g. a future report), so duplicating those
+two strings onto the issue itself would just be a second, driftable copy of data that already
+has one true source.
+
+**The first genuine two-service circular dependency this project has hit, and how it was
+resolved.** `maintenance_service.upload_photo` wants to reuse `media_service.upload_media`
+rather than duplicate its content-type/size validation and storage calls. But
+`media_service`'s own entity-type dispatch table needs a resolver for
+`EntityType="MaintenanceIssue"` that calls `maintenance_service.get_issue`/`ensure_can_edit` -
+so each module needs to import the other. A top-level import on both sides would be a real
+Python circular-import error, not a style nitpick. Resolved with function-local imports
+(`from app.services import media_service` / `from app.services import maintenance_service`
+written *inside* the specific functions that need them, not at module top level) on BOTH sides -
+each file's relevant function has a comment pointing at its counterpart. This is a deliberate,
+pragmatic choice for two modules that legitimately need each other for different reasons, not a
+sign the architecture needs restructuring; confirmed it actually works (not just "should work
+in theory") two ways - `app.main` importing cleanly at all (a real circular import would fail
+at process startup, not silently), and a live curl photo upload that produced a real `MediaFile`
+row end-to-end.
+
+**`assign_issue` auto-advances `Open` → `Assigned` but never moves a further-along issue
+backwards on reassignment** - handing an `InProgress` issue to someone else stays `InProgress`
+and records a `Comment`-type timeline entry instead of a `StatusChange`. This is an interpretive
+convenience (scope doesn't specify assignment's exact interaction with status), documented as
+such in the service.
+
+**`update_status` rejects a no-op transition to the issue's current status with a 422**, and
+sets `CompletedDate` exactly once, the first time an issue enters `Completed` (never overwritten
+by a later `Completed`→`Closed`→ back-to-`Completed` cycle, though scope's own status list
+doesn't actually allow re-opening a Closed issue through this endpoint's semantics - Status is
+deliberately unconstrained to a strict state machine, since scope names six values but never
+specifies a transition graph, and inventing one would be unrequested complexity).
+
+**`get_response_by_id_for_company` (added in Phase 9 for InspectionResponse media) got its
+second real caller here** - `create_issue`'s from-response path uses the exact same function,
+which is good evidence it was designed at the right level of generality rather than being a
+one-off written just for media.
+
+14 new tests (73 total), all against the real DB with issues/updates/media files cleaned up
+per-test (including deleting the file written to `backend/uploads/`): manual create, role-gated
+create (Maintenance role blocked, matching Inspections' Prompt-8-style tier), cross-company 404,
+missing-Property-and-Inspection 422, create-from-response derives Property/Inspection/Location
+correctly, an `AssignedUserId` at create time starts the issue `Assigned` not `Open`,
+cross-company get 404, general-edit 403 for the assigned Maintenance worker (proving the
+route-level Admin/Manager gate holds even for the person actually doing the work), assign moves
+Open→Assigned with a timeline entry, status update 200 for the assigned user / 403 for an
+unassigned one / 422 for a same-status no-op, `Completed` sets `CompletedDate`, note-adding
+writes a `Comment` entry, photo upload writes both a `MediaFile` row and a `PhotoUploaded`
+timeline entry - checked via the maintenance detail response AND the generic `/api/media` list,
+proving the cross-service integration works end-to-end, not just at the import level.
+
+**Verified live** with the full realistic workflow: real Inspector login created an issue on a
+real property → real Admin assigned it to the Maintenance demo user (Open→Assigned) → the
+now-unassigned Inspector got 403 attempting a status update, the assigned Maintenance worker got
+200 (Assigned→InProgress) → a note was added → a real photo uploaded via curl showed up both in
+the issue's own timeline (`PhotoUploaded`) and in a plain `GET /api/media?entity_type=
+MaintenanceIssue...` call → a Bright Spaces admin got 404 on the issue → cleanup required the
+same `SET ANSI_NULLS ON`/`SET QUOTED_IDENTIFIER ON` preamble documented since Phase 2
+(`MaintenanceIssues` carries a filtered index), re-confirming that gotcha is still very much
+alive for any hand-written script touching this table, three phases and one live-server session
+after it was first documented.
