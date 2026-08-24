@@ -539,10 +539,49 @@ Current status. Overwrite/update this file at the end of every session or phase 
     Administrator successfully confirmed it → a Bright Spaces admin got 404 on the record → the
     photo appeared correctly via a plain `GET /api/media?entity_type=MeterReading...` call → all
     test data (the reading, media row, and file) cleaned up afterward.
+- **Phase 15 (Dashboard API) complete**, per scope §23. No new SQL, no new authorization design -
+  view = any company member, same as every other module's read side. The thinnest phase since
+  Phase 7: `database/reports/15_DashboardQueries.sql` already had every metric as a standalone,
+  company-scoped, `ISNULL`-safe query since Phase 2, written specifically to be lifted into this
+  phase.
+  - `app/repositories/dashboard_repository.py` - nine functions, each mirroring one query block
+    in `15_DashboardQueries.sql` 1:1, built with SQLAlchemy Core (`select`/`case`/`func.sum`) to
+    match this project's standing no-raw-SQL-in-repositories convention rather than the source
+    file's literal wording. Every `SUM()` aggregate coalesced with `or 0` in Python (the Phase 2
+    `NULL`-not-`0` gotcha, application-layer form).
+  - **A real bug caught immediately by the Phase-5-established sanity-query-before-writing-routes
+    habit**: `Property.IsActive.is_(True)` compiles to `WHERE [IsActive] IS 1`, a hard T-SQL
+    syntax error on SQL Server (`Msg 102`) - MSSQL's `IS` only accepts `NULL`/`NOT NULL`. Fixed to
+    `Property.IsActive == True  # noqa: E712`, the same pattern `property_repository.py` already
+    used - see `docs/AI_MEMORY.md`'s 2026-08-24 entry for the full story and why it's worth
+    remembering explicitly for any future `Boolean` column filter on this project.
+  - The cleaning-grade query is this project's first ORM-mapped `ROW_NUMBER() OVER (PARTITION BY
+    ...)` window function (`func.row_number().over(...)` inside a `.subquery()`).
+  - Recent-activity queries deliberately join `Property`/`User` for `PropertyName`/`InspectorName`
+    (via `.concat()`, the portable per-dialect-correct string-concat method, not Python `+`) -
+    the one place in the API that departs from every other Response schema's "bare ID, frontend
+    resolves the name" convention, since a dashboard feed needs to be human-readable without N+1
+    follow-up calls (scope §23).
+  - `app/schemas/dashboard.py` - field names match `15_DashboardQueries.sql`'s own column aliases
+    (`DueToday`, `OpenCount`, `GradeAOrB`, etc.), same PascalCase-matches-source convention as
+    every other Response schema, but without `ConfigDict(from_attributes=True)` since a dashboard
+    metric isn't a row from any single ORM entity.
+  - `GET /api/dashboard` - one endpoint, any authenticated company member.
+  - 5 new tests (124 total): auth required, a Maintenance-role user (the most restricted role
+    elsewhere in this project) can view it, a real Urgent maintenance issue moves
+    `OpenCount`/`UrgentOrEmergency` by exactly +1 and shows up in `RecentActivity`, a real
+    Likelihood=5/Severity=5 risk assessment computes `Critical` and moves
+    `CriticalCount`/`OutstandingCount` by +1, and cross-company isolation confirmed end-to-end
+    through the real aggregate queries (a Bright Spaces admin never sees a Northgate-created
+    issue in `RecentActivity`).
+  - **Verified live**: a real Administrator login → `GET /api/dashboard` over actual HTTP
+    returned the correct shape and real seeded-data counts (`TotalActiveProperties=3`,
+    `PropertiesRequiringAttention=1`) → confirmed a real 401 with no token → server stopped
+    cleanly.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch to git is the next action.
+- Nothing in progress. Committing this batch (Dashboard API) to git is the next action.
 
 ## Important decisions
 
@@ -657,26 +696,23 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (AI/OCR Meter Reading) to git.
-2. Phase 15 — Dashboard API (`prompts/backend_prompt.md`, Prompt 15; scope §23). No new SQL and
-   no new authorization design needed - this phase is unusually mechanical compared to the last
-   several: `database/reports/15_DashboardQueries.sql` already has every metric as a standalone,
-   company-scoped, `ISNULL`-safe query, written back in Phase 2 specifically "to be lifted
-   directly into `DashboardRepository` methods in Phase 15" (that file's own header comment).
-   Covers: Inspections (due today/this week/overdue/completed this month), Maintenance
-   (open/high-priority/urgent/overdue), Risks (critical/high/outstanding actions), Cleaning
-   (grade bands A/B, C, D/E - "current" grade per area is the MOST RECENT `CleaningInspection`
-   for that area, a point-in-time assessment, not a stored current-state column, so this needs a
-   `ROW_NUMBER()`-per-area query, already written), Properties (total active, requiring
-   attention - a rollup of overdue inspection / open Urgent-or-Emergency maintenance / open
-   Critical risk, deliberately NOT factoring in cleaning grade to avoid double-alerting), and a
-   10-item recent-activity feed across inspections/maintenance/risks. View: any company member,
-   consistent with every module - a dashboard has no natural "mutate" action of its own. Since
-   every query already exists and is proven, the real work here is a thin `dashboard_service.py`
-   that runs each one scoped to `current_user.CompanyId` (never client input, same rule as
-   everywhere else) and a schema shaping the combined response - genuinely less design surface
-   than any phase since Phase 7, not a place to invent new authorization shapes or complexity
-   that isn't there.
+1. Commit this batch (Dashboard API) to git.
+2. **Phase 16 — React Frontend** (`prompts/frontend_prompt.md`, Prompt 16; scope's own text
+   verbatim there). This is the entire backend API surface's first consumer and a genuinely
+   different undertaking from every phase so far - a new stack (React/React Router/Axios), a
+   mobile-first UI (primary use case: an inspector walking a property on a phone), ~19 named
+   pages, and a dozen-plus named reusable components (StatusBadge, PhotoUploader,
+   InspectionQuestion, etc.) - not an incremental extension of the FastAPI backend pattern the
+   last 15 phases established. Every backend endpoint this phase would consume already exists and
+   is tested (124 tests, all passing, all against the real DB). Prompt 17 (the mobile inspection
+   screen specifically) is the next prompt after this one and is called out in scope as "the most
+   important screen in the application" - worth reading `prompts/frontend_prompt.md` in full
+   before starting either.
+   - Per this project's own established working style (`docs/AI_MEMORY.md`'s 2026-08-23 entry):
+     phase-gate at natural checkpoints for owner review rather than running the entire 20-phase
+     build unattended. The backend being fully feature-complete per scope, immediately before an
+     entirely different stack begins, is exactly that kind of checkpoint - confirm the frontend
+     scope/approach with the owner before writing any frontend code, rather than assuming.
 
 ## Files that require attention
 

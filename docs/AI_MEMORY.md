@@ -910,3 +910,63 @@ afterward - including, this time, remembering the FK direction (`MeterReadings.P
 references `MediaFiles`, so the reading row must be deleted before its media row, not after - a
 real `Msg 547` constraint violation the first cleanup attempt hit, fixed by reordering the two
 DELETEs, not by skipping the reference check).
+
+## 2026-08-24 — Phase 15 (Dashboard API) complete
+
+Per scope §23. No new SQL, no new authorization design (view = any company member, the same
+"a dashboard has no mutate action" reasoning applied everywhere else) - genuinely the thinnest
+phase since Phase 7, exactly as `AI_HANDOFF.md`'s Phase 14 "Next tasks" entry predicted, because
+`database/reports/15_DashboardQueries.sql` had already done the real design work back in Phase 2.
+
+- `app/repositories/dashboard_repository.py` - nine functions, each mirroring one query block in
+  `15_DashboardQueries.sql` 1:1 (that file's own header comment: "to be lifted directly into
+  DashboardRepository methods in Phase 15" - taken literally, not reinterpreted). Built with
+  SQLAlchemy Core (`select`/`case`/`func.sum`), not raw `text()` SQL - this project's standing
+  convention (no repository anywhere else uses raw SQL) took priority over the header comment's
+  literal wording; the *logic* was lifted directly, the *mechanism* stayed idiomatic to match
+  every other repository in the codebase. `SUM()` over zero matching rows still returns `NULL` in
+  SQL Server (the Phase 2 gotcha), so every aggregate is coalesced with `or 0` in Python -
+  `ISNULL(...)`'s exact application-layer equivalent.
+- **A real, caught-immediately bug**: the first version used `Property.IsActive.is_(True)`
+  (SQLAlchemy's portable boolean-comparison method), which compiles to `WHERE [IsActive] IS 1` -
+  valid on backends with a native boolean type, but a hard T-SQL syntax error on SQL Server
+  (`Msg 102`, "Incorrect syntax near '1'"), since MSSQL's `IS` only accepts `NULL`/`NOT NULL`.
+  Caught immediately by the Phase-5-established habit of sanity-querying a new repository against
+  the real DB before writing any route - `app/repositories/property_repository.py` already had
+  the fix as a standing pattern (`Property.IsActive == True  # noqa: E712`), just not one this
+  session recalled from memory before writing the query fresh; worth remembering explicitly now
+  so it doesn't cost a repeat lookup next time a `Boolean` column needs a `WHERE` filter on this
+  project.
+- The cleaning-grade query is the project's first ORM-mapped `ROW_NUMBER() OVER (PARTITION BY
+  ...)` window function (`func.row_number().over(partition_by=..., order_by=...)` inside a
+  `.subquery()`) - confirmed working by direct comparison against the raw SQL's own already-tested
+  version, not assumed to translate correctly just because SQLAlchemy exposes the API.
+- Recent-activity queries join `Property`/`User` directly for `PropertyName`/`InspectorName`
+  rather than reusing the existing `vw_InspectionSummary`/`vw_OpenMaintenanceIssues`/
+  `vw_ActiveRiskAssessments` views through raw SQL - deliberate, not an oversight: every other
+  Response schema in this project returns bare `PropertyId`, not a joined `PropertyName` (the
+  frontend is expected to resolve names itself elsewhere), but a dashboard's recent-activity feed
+  is explicitly meant to be a human-readable list *without* N+1 follow-up calls (scope §23,
+  and the views' own `14_InspectionViews.sql` header: "for list screens and reports"), so this is
+  the one place in the API surface that intentionally departs from the ID-only convention.
+  `User.FirstName.concat(" ").concat(User.LastName)` used for the joined name, not Python `+` on
+  the columns - SQLAlchemy's `.concat()` is the portable, per-dialect-correct way to do this
+  (mirrors `IsActive == True` as "the SQLAlchemy-idiomatic form matters, not just 'produces a
+  working query on this one backend'").
+- `app/schemas/dashboard.py` field names match the SQL column aliases from
+  `15_DashboardQueries.sql` (`DueToday`, `OpenCount`, `GradeAOrB`, etc.) directly, same PascalCase-
+  matches-source convention every other Response schema in this project already follows - but
+  without `ConfigDict(from_attributes=True)`, since a dashboard metric isn't a row from any one
+  ORM entity the way every other Response schema's source is.
+- 5 new tests (124 total): auth required, a Maintenance-role user (the most restricted role
+  everywhere else in this project) confirmed able to view the dashboard, creating a real Urgent
+  maintenance issue moves `OpenCount`/`UrgentOrEmergency` by exactly +1 and appears in
+  `RecentActivity`, creating a real Likelihood=5/Severity=5 risk assessment computes `Critical`
+  and moves `CriticalCount`/`OutstandingCount` by +1, and a Bright Spaces admin's dashboard never
+  shows a Northgate-created issue in `RecentActivity` (company isolation, exercised end-to-end
+  through the real aggregate queries rather than asserted against a single row).
+- **Verified live**: a real Administrator login → `GET /api/dashboard` over actual HTTP returned
+  the correct shape and real seeded-data counts (`TotalActiveProperties=3`,
+  `PropertiesRequiringAttention=1` matching the one demo property with an overdue
+  `NextInspectionDue`) → confirmed `GET /api/dashboard` with no token returns a real 401 → server
+  stopped cleanly.
