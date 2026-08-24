@@ -116,3 +116,9 @@ class RiskAssessmentStatus(str, Enum):
     OPEN = "Open"
     ACTION_PLANNED = "ActionPlanned"
     CLOSED = "Closed"
+
+
+class MeterType(str, Enum):
+    ELECTRICITY = "Electricity"
+    GAS = "Gas"
+    WATER = "Water"

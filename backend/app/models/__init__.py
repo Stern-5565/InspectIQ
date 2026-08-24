@@ -25,6 +25,7 @@ from app.models.inspection_template import InspectionTemplate
 from app.models.maintenance_issue import MaintenanceIssue
 from app.models.maintenance_update import MaintenanceUpdate
 from app.models.media_file import MediaFile
+from app.models.meter_reading import MeterReading
 from app.models.property import Property
 from app.models.risk_assessment import RiskAssessment
 from app.models.risk_matrix_level import RiskMatrixLevel
@@ -46,6 +47,7 @@ __all__ = [
     "MaintenanceIssue",
     "MaintenanceUpdate",
     "MediaFile",
+    "MeterReading",
     "Property",
     "RiskAssessment",
     "RiskMatrixLevel",

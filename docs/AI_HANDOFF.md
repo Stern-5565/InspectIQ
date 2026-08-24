@@ -224,9 +224,9 @@ Current status. Overwrite/update this file at the end of every session or phase 
     module-public for this reuse). Caption-edit/delete are narrower still: uploader or
     Admin/Manager only. `SUPPORTED_ENTITY_TYPES` originally excluded MeterReading/
     MaintenanceIssue/RiskAssessment/CleaningInspection, whose own services didn't exist yet;
-    MaintenanceIssue (Phase 10), CleaningInspection (Phase 11), VacantUnitInspection (Phase 12),
-    and RiskAssessment (Phase 13, see below) have since been added — MeterReading is the one
-    remaining type still deferred, to Phase 14.
+    all of them have since been added (MaintenanceIssue Phase 10, CleaningInspection Phase 11,
+    VacantUnitInspection Phase 12, RiskAssessment Phase 13, MeterReading Phase 14, see below) —
+    `SUPPORTED_ENTITY_TYPES` now covers every entity type scope §20 names, nothing left deferred.
   - `app/repositories/inspection_response_repository.py` gained
     `get_response_by_id_for_company` — the one function there that takes `company_id` directly
     (documented as a deliberate exception to the file's own "no company_id param" rule), needed
@@ -485,6 +485,60 @@ Current status. Overwrite/update this file at the end of every session or phase 
     recomputed to `"Low"` → a Bright Spaces admin got 404 on the record → the Inspector
     successfully uploaded evidence to the same record they couldn't edit → all test data (the
     assessment, media row, and file) cleaned up afterward.
+- **Phase 14 (AI/OCR Meter Reading) complete**, per scope §11. No new SQL —
+  `MeterReadings` has existed since Phase 2. `SUPPORTED_ENTITY_TYPES` in `media_service.py` now
+  covers every scope §20 entity type — MeterReading was the last one.
+  - `app/models/meter_reading.py` — added to `models/__init__.py` and sanity-queried before any
+    route was written. `AIDetectedReading`/`ConfirmedReading` stay separate columns, matching
+    the DB design exactly — scope §11 is explicit the AI value must never silently become the
+    confirmed one. `PhotoMediaFileId` is a direct 1:1 FK to one `MediaFiles` row, unlike every
+    other module's polymorphic many-photos pattern — the row still gets created through the SAME
+    `EntityType="MeterReading"` polymorphic mechanism as everywhere else, just with this column
+    denormalizing a pointer to it, since a meter reading has exactly one confirmable photo.
+  - `app/services/meter_ocr.py` — `IMeterReadingOcrService` Protocol (mirroring
+    `IMediaStorageService`'s local-now/swappable-later shape from Phase 9) + a
+    `MockMeterReadingOcrService` that returns scope §11's own illustrative example value
+    (`18294.6`, confidence `0.87`) without inspecting the actual image — a real OCR/vision API
+    integration is a future drop-in second implementation of the same Protocol, per scope's own
+    "mock provider first" instruction.
+  - **A genuinely hybrid authorization tier** for confirm/update — not copied wholesale from
+    Cleaning/VacantUnit's Inspection-anchored pattern OR Risk's Admin/Manager-only one, because
+    `MeterReading.InspectionResponseId` is nullable (like Risk) but scope §11's own flow text
+    explicitly names "the inspector" as who confirms/corrects (unlike Risk, where nothing
+    suggests the raiser should be the closer). `ensure_can_edit_reading` checks both facts:
+    Inspection-linked → reuses `inspection_service.ensure_can_edit`; standalone → falls back to
+    Administrator/Manager only. See `app/services/meter_reading_service.py`'s module docstring.
+  - **A real bug, caught by a failing test before it ever reached a route**: the first version
+    of `MeterReading`'s media MUTATE check reused `ensure_can_edit_reading` directly (the
+    confirm/update tier) — which 403'd the very Inspector legitimately creating a brand-new
+    STANDALONE reading, since a freshly-created reading has no `AssignedUserId`/Inspection yet
+    to satisfy that check. Fixed by making the media mutate check the SAME as the view check
+    (any company member), matching `RiskAssessment`'s exact reasoning: the photo is attached
+    automatically as an integral part of CREATE (a broader, earlier moment, already gated by the
+    route's own Administrator/Manager/Inspector role check), while `ensure_can_edit_reading`'s
+    narrower hybrid tier governs only the SEPARATE later confirm-or-correct action. Full story
+    in `docs/AI_MEMORY.md`'s 2026-08-24 entry.
+  - Create is one combined multipart request (property/meter details + the photo together via
+    `Form(...)`/`File(...)`, not a JSON body), matching the maintenance/cleaning photo-upload
+    routes' convention — it triggers store-reading → upload-photo-through-the-polymorphic-
+    system → run-mock-OCR → return-the-AI-reading as one atomic action, mirroring scope §11's
+    own flow exactly.
+  - `app/api/meter_readings.py` — `POST/GET /api/meter-readings`, `GET /api/meter-readings/{id}`,
+    `PATCH /api/meter-readings/{id}` (the confirm/correct step).
+  - 11 new tests (119 total), all against the real DB: create runs the mock OCR and returns the
+    expected fixed values with `ConfirmedReading` still `None`, role-gated create (Maintenance
+    blocked), cross-company 404 on create, invalid `MeterType` 422, create linked to a real
+    `InspectionResponse` correctly stores the link, cross-company get 404, the photo visible via
+    the *generic* `/api/media` endpoint (proving the polymorphic integration), confirm by the
+    assigned inspector (Inspection-linked) succeeds while confirm by a DIFFERENT inspector 403s,
+    confirm on a STANDALONE reading 403s for an Inspector but succeeds for an Admin (the hybrid
+    tier's two branches, both exercised), and a basic list/filter check.
+  - **Verified live**: a real Inspector uploaded a real meter photo via curl → the mock OCR
+    returned `AIDetectedReading=18294.6000`/`AIConfidence=0.8700` matching scope's own example →
+    that same Inspector got a real 403 trying to confirm their own standalone reading → a real
+    Administrator successfully confirmed it → a Bright Spaces admin got 404 on the record → the
+    photo appeared correctly via a plain `GET /api/media?entity_type=MeterReading...` call → all
+    test data (the reading, media row, and file) cleaned up afterward.
 
 ## Currently being worked on
 
@@ -557,14 +611,23 @@ dependencies pinned with `>=` floors in `requirements.txt` — see `backend/READ
 **Any file object handed to a `StreamingResponse` (or returned from any storage abstraction)
 must be explicitly closed — Starlette does not close it for you**, confirmed by a real Windows
 `PermissionError` when Phase 9's first `/download` implementation leaked a handle; see
-`app/api/media.py`'s `_iter_and_close`. When adding a new polymorphic-media entity type
-(only MeterReading remains, Phase 14), add it to both `media_service.py`'s `_VIEW_CHECKS` and
-`_MUTATE_CHECKS` dicts and to `app/schemas/media_file.py`'s `ENTITY_TYPES` tuple — not just one
-of the three (MaintenanceIssue in Phase 10 is the reference example; CleaningInspection/
-VacantUnitInspection/RiskAssessment in Phases 11-13 each followed the same checklist, and
-`test_media.py`'s "unsupported EntityType" test has had to be updated to point at whichever type
-is still genuinely unsupported every single phase since Phase 9 — check that test too, not just
-the two dicts and the tuple).
+`app/api/media.py`'s `_iter_and_close`. `media_service.SUPPORTED_ENTITY_TYPES` now covers every
+scope §20 entity type (MeterReading, Phase 14, was the last) — `test_media.py`'s "unsupported
+EntityType" test had to switch to an obviously-fake string (`"NotARealEntityType"`) since no
+real-but-unbuilt table name remains; if scope's own entity list ever grows, the same three-place
+checklist applies again (`_VIEW_CHECKS`/`_MUTATE_CHECKS`, `ENTITY_TYPES` tuple, that test).
+**A permission check reused from a DIFFERENT action on the same entity can be wrong even when it
+looks like the "obvious" reuse** — confirmed by a real, caught-by-a-failing-test bug in Phase 14:
+MeterReading's media-upload check first reused `meter_reading_service.ensure_can_edit_reading`
+(the CONFIRM/update tier), which 403'd the very Inspector legitimately creating a brand-new
+standalone reading, because a freshly-created record has no `AssignedUserId`/Inspection yet to
+satisfy that narrower check. The photo is attached as an integral part of CREATE (a broader,
+earlier moment, already gated by the route's own role check) - confirming the numeric value is a
+separate, later action with its own narrower gate. When one entity has two distinct mutating
+actions (create-with-attachment vs. confirm-or-correct), verify which action a media-mutate
+check is actually supposed to gate before wiring it to whichever permission function is nearest
+at hand - Property/Unit/RiskAssessment's "media mutate = view, not edit" precedent turned out to
+be the right template here too, but only after checking, not by default.
 **A "global default + per-company override" nullable-CompanyId pattern needs its exact lookup
 semantics re-derived per table, not copied verbatim from `InspectionTemplates`** — confirmed by
 `RiskMatrixLevels` in Phase 13 needing the OPPOSITE semantics from `InspectionTemplates`: a
@@ -594,30 +657,26 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Risk Assessments) to git.
-2. Phase 14 — AI/OCR Meter Reading (`prompts/backend_prompt.md`, Prompt 10; scope §11):
-   `MeterReadings` model (table already exists, Phase 2 — `MeterReadingId PK,
-   InspectionResponseId FK NULLABLE, PropertyId FK denormalized for "latest reading" queries
-   without joining through Inspection, MeterType CHECK enum Electricity/Gas/Water
-   future-proofed, MeterSerialNumber, PhotoMediaFileId FK MediaFiles, AIDetectedReading DECIMAL
-   NULLABLE, AIConfidence DECIMAL NULLABLE, ConfirmedReading DECIMAL NULLABLE, ReadingDateTime,
-   InspectorNotes`). `AIDetectedReading`/`ConfirmedReading` are deliberately separate columns
-   (scope §11: never let the AI value silently become the confirmed one) - the last module
-   still using this project's real-computed-column-and-snapshot family of patterns before
-   moving into genuinely new territory: an actual external OCR call. Scope explicitly asks for
-   "mock provider first" (Prompt 10's own phrasing per the phase table) - build an
-   `IMeterReadingOcrService`-style abstraction (mirroring `IMediaStorageService`'s
-   local-now/swappable-later shape from Phase 9) with a mock implementation that returns a
-   plausible fake reading + confidence, not a real OCR API integration yet. `PhotoMediaFileId`
-   means this phase depends on Phase 9's media upload already existing (it does) - the meter
-   photo IS a `MediaFile`, uploaded via the existing generic `/api/media` endpoint with
-   `EntityType="MeterReading"`, not a bespoke upload path. This is also the LAST entity type
-   `media_service.SUPPORTED_ENTITY_TYPES` needs (`docs/DATABASE.md`'s scope §20 list is then
-   fully covered) - check both import directions independently before deciding whether a
-   local-import workaround is needed, per the note above. Once MeterReading is added,
-   `test_media.py`'s "unsupported EntityType" test has no real remaining example left to use -
-   switch it to an obviously-fake string (e.g. `"NotARealEntityType"`) rather than reaching for
-   another real-but-not-yet-built table name, since none will be left.
+1. Commit this batch (AI/OCR Meter Reading) to git.
+2. Phase 15 — Dashboard API (`prompts/backend_prompt.md`, Prompt 15; scope §23). No new SQL and
+   no new authorization design needed - this phase is unusually mechanical compared to the last
+   several: `database/reports/15_DashboardQueries.sql` already has every metric as a standalone,
+   company-scoped, `ISNULL`-safe query, written back in Phase 2 specifically "to be lifted
+   directly into `DashboardRepository` methods in Phase 15" (that file's own header comment).
+   Covers: Inspections (due today/this week/overdue/completed this month), Maintenance
+   (open/high-priority/urgent/overdue), Risks (critical/high/outstanding actions), Cleaning
+   (grade bands A/B, C, D/E - "current" grade per area is the MOST RECENT `CleaningInspection`
+   for that area, a point-in-time assessment, not a stored current-state column, so this needs a
+   `ROW_NUMBER()`-per-area query, already written), Properties (total active, requiring
+   attention - a rollup of overdue inspection / open Urgent-or-Emergency maintenance / open
+   Critical risk, deliberately NOT factoring in cleaning grade to avoid double-alerting), and a
+   10-item recent-activity feed across inspections/maintenance/risks. View: any company member,
+   consistent with every module - a dashboard has no natural "mutate" action of its own. Since
+   every query already exists and is proven, the real work here is a thin `dashboard_service.py`
+   that runs each one scoped to `current_user.CompanyId` (never client input, same rule as
+   everywhere else) and a schema shaping the combined response - genuinely less design surface
+   than any phase since Phase 7, not a place to invent new authorization shapes or complexity
+   that isn't there.
 
 ## Files that require attention
 

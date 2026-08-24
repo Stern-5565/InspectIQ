@@ -1,18 +1,17 @@
 """Media upload/retrieve/delete (Phase 9, scope §20). See app/services/media_storage.py for the
 storage abstraction and PROJECT_PLAN.md §8 for the architecture this implements.
 
-SUPPORTED_ENTITY_TYPES is deliberately narrower than scope §20's full list (which also names
-MeterReading). That table exists in the DB (Phase 2), but its own module/service doesn't exist
-yet (Phase 14) - and §8's core rule is "file access authorization mirrors the parent entity's
-authorization," which is impossible to enforce for a parent entity with no service to ask. Add
-it to _VIEW_CHECKS/_MUTATE_CHECKS (and this tuple) once its own phase lands, the same incremental
-pattern Phase 7's read-only Templates API and Phase 8's engine already followed. MaintenanceIssue
-(Phase 10), CleaningInspection (Phase 11), VacantUnitInspection (Phase 12), and RiskAssessment
-(Phase 13) were added the same way - CleaningInspection/VacantUnitInspection/RiskAssessment's
-resolvers are plain top-level imports (unlike MaintenanceIssue's local-import workaround below),
-since none of cleaning_service/vacant_unit_service/risk_service ever needs to import
-media_service back: there's no real circular dependency to avoid on their side, only Maintenance
-actually has one.
+SUPPORTED_ENTITY_TYPES now covers every entity type scope §20 names - MeterReading (Phase 14)
+was the last one. MaintenanceIssue (Phase 10), CleaningInspection (Phase 11),
+VacantUnitInspection (Phase 12), RiskAssessment (Phase 13), and MeterReading (Phase 14) were each
+added the same incremental way Phase 7's read-only Templates API and Phase 8's engine
+established: extend `_VIEW_CHECKS`/`_MUTATE_CHECKS` and this tuple once the entity's own service
+exists, never before. CleaningInspection/VacantUnitInspection/RiskAssessment's resolvers are
+plain top-level imports (no real circular dependency on their side); MaintenanceIssue and
+MeterReading both need the function-local-import workaround (see `_view_maintenance_issue`/
+`_view_meter_reading` below) because both of THEIR services call back into `media_service.
+upload_media` to build their own combined create-and-upload action, unlike Cleaning/VacantUnit/
+Risk, none of which needs to call into media_service at all.
 
 Two authorization levels per entity type, not one:
 - View (list/download): can the user see the PARENT entity at all? Reuses each parent module's
@@ -31,7 +30,16 @@ Two authorization levels per entity type, not one:
   endpoint is Admin/Manager-only (a standalone risk register entry may have no parent Inspection
   to run ensure_can_edit against at all), but attaching photographic evidence of a hazard is not
   the same permission as fully editing the risk register entry, the identical "upload evidence
-  is broader than edit" reasoning already established for Property/Unit.
+  is broader than edit" reasoning already established for Property/Unit. MeterReading's mutate
+  check is ALSO the same as its view check, for a related but distinct reason: the photo is
+  attached automatically as an integral part of CREATE (Administrator/Manager/Inspector, gated
+  at the route), a broader and strictly earlier moment than confirming the reading -
+  meter_reading_service.ensure_can_edit_reading's own narrower hybrid tier governs the SEPARATE
+  confirm-or-correct PATCH, not photo attachment. Reusing that narrower tier here was tried
+  first and was a real bug, not a hypothetical one: it 403'd the very Inspector legitimately
+  creating a brand-new standalone reading, because a freshly-created reading has no
+  AssignedUserId/Inspection to satisfy ensure_can_edit_reading's checks yet. Caught by an actual
+  failing test, not by re-reading the code - see docs/AI_MEMORY.md's 2026-08-24 Phase 14 entry.
 """
 from typing import BinaryIO
 
@@ -66,6 +74,7 @@ SUPPORTED_ENTITY_TYPES = (
     "CleaningInspection",
     "VacantUnitInspection",
     "RiskAssessment",
+    "MeterReading",
 )
 
 _IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
@@ -149,6 +158,15 @@ def _view_risk_assessment(db: Session, current_user: User, entity_id: int) -> No
     risk_service.get_risk_assessment(db, current_user, entity_id)
 
 
+def _view_meter_reading(db: Session, current_user: User, entity_id: int) -> None:
+    # Local import: meter_reading_service.create_meter_reading calls INTO
+    # media_service.upload_media, which reaches this function - a top-level import either
+    # direction would be circular. Same pattern as MaintenanceIssue above.
+    from app.services import meter_reading_service
+
+    meter_reading_service.get_meter_reading(db, current_user, entity_id)
+
+
 _VIEW_CHECKS = {
     "Property": _view_property,
     "Unit": _view_unit,
@@ -158,6 +176,7 @@ _VIEW_CHECKS = {
     "CleaningInspection": _view_cleaning_inspection,
     "VacantUnitInspection": _view_vacant_unit_inspection,
     "RiskAssessment": _view_risk_assessment,
+    "MeterReading": _view_meter_reading,
 }
 
 _MUTATE_CHECKS = {
@@ -168,9 +187,16 @@ _MUTATE_CHECKS = {
     "MaintenanceIssue": _mutate_maintenance_issue,
     "CleaningInspection": _mutate_cleaning_inspection,
     "VacantUnitInspection": _mutate_vacant_unit_inspection,
-    # Deliberately the SAME function as the view check, not a new one - see the module
-    # docstring's "RiskAssessment's mutate check" paragraph.
+    # Deliberately the SAME function as the view check for both of these, not a new one - see
+    # the module docstring's "RiskAssessment's mutate check" paragraph. MeterReading's own
+    # narrower hybrid tier (meter_reading_service.ensure_can_edit_reading) governs CONFIRMING/
+    # CORRECTING the reading via its own PATCH endpoint, not attaching the photo - the photo is
+    # attached automatically as an integral part of CREATE (Administrator/Manager/Inspector,
+    # gated at the route level), a broader and earlier moment than confirming the value, so
+    # reusing the update-tier check here would incorrectly block the very Inspector who is
+    # legitimately creating the reading (confirmed by a real 403 before this was fixed).
     "RiskAssessment": _view_risk_assessment,
+    "MeterReading": _view_meter_reading,
 }
 
 

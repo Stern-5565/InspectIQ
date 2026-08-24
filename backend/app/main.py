@@ -12,6 +12,7 @@ from app.api import (
     inspections,
     maintenance,
     media,
+    meter_readings,
     properties,
     risk,
     units,
@@ -59,3 +60,4 @@ app.include_router(maintenance.router, prefix="/api")
 app.include_router(cleaning.router, prefix="/api")
 app.include_router(vacant_units.router, prefix="/api")
 app.include_router(risk.router, prefix="/api")
+app.include_router(meter_readings.router, prefix="/api")

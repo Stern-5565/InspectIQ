@@ -2,8 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Kept in sync by hand with app/services/media_service.py's SUPPORTED_ENTITY_TYPES - see that
-# module's docstring for why this list is narrower than scope §20's full set for now.
+# Kept in sync by hand with app/services/media_service.py's SUPPORTED_ENTITY_TYPES - now the
+# complete scope §20 list; see that module's docstring for the phase each type was added in.
 ENTITY_TYPES = (
     "Property",
     "Unit",
@@ -13,6 +13,7 @@ ENTITY_TYPES = (
     "CleaningInspection",
     "VacantUnitInspection",
     "RiskAssessment",
+    "MeterReading",
 )
 
 

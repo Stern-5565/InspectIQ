@@ -818,3 +818,95 @@ successfully uploaded evidence to it → all test data (the assessment, the medi
 file on disk) cleaned up afterward, with a direct DB check confirming zero leftover
 company-specific `RiskMatrixLevels` rows - the override test's own cleanup genuinely restored
 global-default behavior for every company, not just asserted that it did.
+
+## 2026-08-24 — Phase 14 (AI/OCR Meter Reading) built, a real bug caught by its own failing test
+
+Built the meter-reading module per scope §11 - the last phase drawing on this project's real-
+computed-column-and-snapshot family of patterns (Phases 2/13) before entering genuinely new
+territory: a mock external service call. `MeterReadings` was already a real table since Phase 2
+(`database/tables/04_InspectionTables.sql`), so like every phase since 9, no new SQL.
+
+**`IMeterReadingOcrService` mirrors `IMediaStorageService`'s exact local-now/swappable-later
+shape (Phase 9)** - a `Protocol` plus a `MockMeterReadingOcrService` that returns scope §11's own
+illustrative example value (`18294.6`, confidence `0.87`) without ever inspecting the actual
+image bytes, matching scope's explicit "mock provider first" instruction rather than building a
+half-real OCR integration prematurely. The mock is wired through the SAME `open_media_stream`
+every real caller would use (`media_service.open_media_stream`, then `.close()` in a `finally` -
+the Phase 9 file-handle-leak lesson applied here too even though the mock never reads the
+stream), so a future real implementation only needs to swap `MockMeterReadingOcrService` for a
+genuine API-calling class - nothing about how the stream reaches it changes.
+
+**`PhotoMediaFileId` is a direct 1:1 FK to a single `MediaFiles` row, the first module to depart
+from the polymorphic many-photos pattern every prior media-carrying module used unmodified.**
+The row still gets created through the exact same `EntityType="MeterReading"` polymorphic
+mechanism as everywhere else (Property/Unit/Inspection/MaintenanceIssue/CleaningInspection/
+VacantUnitInspection/RiskAssessment) - `PhotoMediaFileId` is just a denormalized "primary photo"
+pointer kept in sync on top of that, not a parallel storage mechanism. This was a deliberate,
+schema-driven choice, not laziness: a meter reading genuinely has exactly one confirmable photo
+(the photo IS the evidence for the reading, scope §11's whole flow revolves around it), unlike
+every other module's "attach as many supporting photos as you like" relationship.
+
+**A genuinely hybrid authorization tier for confirm/update - synthesized from the specific
+combination of two facts about this module, neither alone dictating the answer.**
+`MeterReading.InspectionResponseId` is nullable, structurally identical to `RiskAssessment.
+InspectionId` (a meter can legitimately be read standalone, not tied to one specific checklist
+question) - that fact alone would point toward Risk's Admin/Manager-only shape. But scope §11's
+flow text is explicit in a way Risk's never is: "ask inspector to confirm or correct" names the
+inspector, not a manager, as the one who closes the loop on this exact record. `ensure_can_edit_
+reading` honors both facts by branching on whether the reading has a parent Inspection to check:
+if so, reuse `inspection_service.ensure_can_edit` (assigned inspector or Admin/Manager, Cleaning/
+VacantUnit's shape); if not, fall back to Administrator/Manager only (Risk's shape). Neither
+existing precedent fit the whole picture alone; this module needed both, conditionally.
+
+**A real bug, caught by an actual failing test the first time this module's tests ran - not
+found by re-reading the code afterward.** The first version of `MeterReading`'s media-upload
+mutate check in `media_service.py` reused `meter_reading_service.ensure_can_edit_reading`
+directly (the confirm/update tier described above), reasoning by analogy from CleaningInspection/
+VacantUnitInspection, whose media mutate checks DO reuse their update tier. Running
+`test_create_as_inspector_runs_mock_ocr` for the first time produced a genuine `403 Forbidden`
+with the message "Only an Administrator or Manager can modify a meter reading not linked to an
+inspection" - on a request an Inspector, gated in by the route's own
+Administrator/Manager/Inspector role check, was making to CREATE a brand-new record. The cause:
+`create_meter_reading` creates the `MeterReading` row, THEN calls `media_service.upload_media` to
+attach its defining photo - and at that exact moment, the row is standalone (no
+`InspectionResponseId` was supplied in this test) and has no `AssignedUserId`-equivalent, so
+`ensure_can_edit_reading`'s fallback branch (Admin/Manager only) rejected the very Inspector who
+was legitimately allowed to be here. The fix: the photo attached at CREATE time needs the CREATE
+permission (broader, already satisfied by the route gate), not the record's own narrower
+CONFIRM/update permission - these are two different actions at two different moments on the same
+entity, and reusing one for the other was the actual mistake, not a phrasing detail. Changed
+`MeterReading`'s media mutate check to equal its view check (any company member), the same
+`RiskAssessment` "uploading evidence isn't the same as editing" shape - confirmed correct because
+CleaningInspection/VacantUnitInspection genuinely don't have this problem (their photos are
+supplementary evidence attached to an already-fully-created, already-Inspection-linked record,
+never as part of an atomic create-and-upload sequence the way MeterReading's is). **Standing
+lesson, stated precisely rather than as a vague "be careful": before wiring a media mutate check
+to an existing permission function, identify which ACTION on the entity that function actually
+gates, and confirm the media attachment is really the same action - not just the nearest
+available function on the same service.**
+
+11 new tests (119 total), all against the real DB with readings/media cleaned up per-test
+(files actually deleted from `backend/uploads/`): create runs the mock OCR and returns exactly
+the expected fixed values with `ConfirmedReading` still `None` (proving the AI value never
+auto-becomes confirmed), role-gated create (Maintenance blocked), cross-company 404 on create, an
+invalid `MeterType` rejected 422, create linked to a real `InspectionResponse` correctly stores
+both the link and (implicitly, by not raising) the property-match validation, cross-company get
+404, the photo visible through the *generic* `/api/media` endpoint with the same
+`MediaFileId` the create response returned (proving the polymorphic integration end-to-end, not
+just at the import level), confirm by the assigned inspector on an Inspection-linked reading
+succeeding while confirm by a different, unassigned inspector 403s, confirm on a STANDALONE
+reading 403ing for an Inspector but succeeding for an Administrator moments later (both branches
+of the hybrid tier exercised in one test, back to back), and a basic list/filter check.
+
+**Verified live**: a real Inspector uploaded a real meter photo via curl, and the mock OCR
+returned `AIDetectedReading=18294.6000`/`AIConfidence=0.8700` - matching scope §11's own
+illustrative example exactly, confirming the mock's deliberate choice to reuse that value rather
+than an arbitrary placeholder pays off in a demo session too → that same Inspector got a real 403
+trying to confirm their own just-created standalone reading (the fixed bug, re-confirmed live
+after the fix, not just in pytest) → a real Administrator successfully confirmed it → a Bright
+Spaces admin got 404 on the record → the photo appeared correctly via a plain `GET /api/media?
+entity_type=MeterReading...` call → all test data (the reading, media row, and file) cleaned up
+afterward - including, this time, remembering the FK direction (`MeterReadings.PhotoMediaFileId`
+references `MediaFiles`, so the reading row must be deleted before its media row, not after - a
+real `Msg 547` constraint violation the first cleanup attempt hit, fixed by reordering the two
+DELETEs, not by skipping the reference check).

@@ -140,11 +140,11 @@ def test_upload_for_property_in_another_company_returns_404(
 def test_upload_with_unsupported_entity_type_returns_422(
     client: TestClient, northgate_inspector, northgate_property_id: int
 ) -> None:
-    # MeterReading's own service doesn't exist yet (Phase 14) - still a genuinely unsupported
-    # EntityType, the only one left. MaintenanceIssue/CleaningInspection/VacantUnitInspection/
-    # RiskAssessment each stopped being valid examples of this the moment their own phase added
-    # them to media_service.SUPPORTED_ENTITY_TYPES (Phases 10-13).
-    response = _upload(client, auth_headers(client, northgate_inspector.Email), "MeterReading", 1)
+    # MeterReading (Phase 14) was the LAST real scope §20 entity type added to
+    # media_service.SUPPORTED_ENTITY_TYPES - every real table name is now supported, so this
+    # test uses an obviously-fake string instead of reaching for another real-but-unbuilt table
+    # name, since none remain.
+    response = _upload(client, auth_headers(client, northgate_inspector.Email), "NotARealEntityType", 1)
     assert response.status_code == 422
 
 
