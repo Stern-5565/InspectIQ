@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InspectIQ</title>
+    <!--
+      CSP built in from Phase 16 (frontend's very first commit), not retrofitted later -
+      PROJECT_PLAN.md §7 explicitly calls this out as a PropertyManager lesson: that project
+      deferred it and paid for it twice (once as a documented gap, once as a redeployment bug
+      when a wrong connect-src silently blocked every API call with no console error).
+
+      style-src is %VITE_CSP_STYLE_SRC% (see .env.development/.env.production), not a fixed
+      value - a real, reproduced dev-only problem, not a hypothetical one: Vite's dev server
+      injects live CSS as an inline <style> tag for instant HMR (no per-instance component code
+      involved, unlike PropertyManager's BarChart/Skeleton needing 'unsafe-inline' for their own
+      inline style={{...}} usage). A strict style-src blocked it outright - confirmed by an
+      actual "Applying inline style violates ... style-src 'self'" console error AND every
+      button/card rendering with default unstyled browser chrome (getComputedStyle showed the
+      browser's default background, not anything from global.css). `vite build` was confirmed
+      (a real build, dist/index.html inspected) to emit a normal external
+      <link rel="stylesheet">, not an inline tag - production genuinely doesn't need the
+      relaxation dev does, so .env.production keeps style-src strict.
+
+      A related, NOT-fully-fixable dev-mode gap, found the same way: Vite's dev server also
+      prepends its own inline React-Refresh-preamble <script type="module"> and
+      /@vite/client <script> at the very top of <head>, ahead of anything in this file's own
+      source order (confirmed by fetching this page's own served HTML) - meaning THIS <meta>
+      tag's script-src restriction does not apply to them at all, since a <meta> CSP only
+      governs content parsed after its own position. This is Vite's own trusted dev tooling
+      (not app or third-party code), and does not exist in a production build's index.html at
+      all (confirmed by inspecting dist/index.html), so it's accepted as a dev-only tooling gap
+      rather than something to work around - reordering this file's own tags cannot fix it,
+      since Vite prepends unconditionally regardless of where these tags are authored.
+
+      frame-ancestors is deliberately NOT here - that directive has no effect via <meta>, only
+      via a real HTTP header, so it would be a silent no-op if included (same PropertyManager
+      finding).
+
+      %VITE_API_ORIGIN% is Vite's own HTML env-replacement syntax (baked in at build time).
+      Deliberately a SEPARATE variable from VITE_API_BASE_URL (see .env.example) - CSP's
+      connect-src path-matching is exact-match-or-nothing when a source includes a path at all,
+      so reusing VITE_API_BASE_URL (which includes /api) would silently block real requests like
+      .../api/health. The origin alone (no path) matches every path under it.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src %VITE_CSP_STYLE_SRC%; img-src 'self' data:; connect-src 'self' %VITE_API_ORIGIN%; base-uri 'self'; object-src 'none'; form-action 'self';"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -578,10 +578,81 @@ Current status. Overwrite/update this file at the end of every session or phase 
     returned the correct shape and real seeded-data counts (`TotalActiveProperties=3`,
     `PropertiesRequiringAttention=1`) → confirmed a real 401 with no token → server stopped
     cleanly.
+- **Phase 16 (React Frontend) — scaffold + auth done, NOT the full phase.** Prompt 16 names ~19
+  pages; only the auth flow and a real Dashboard page exist so far. Everything else (Properties,
+  Inspections, Maintenance, Risk, Cleaning, Vacant Units, Meter Readings, Admin Settings, and
+  Prompt 17's mobile inspection screen) is still to come, built module-by-module against the
+  already-complete, already-tested backend - same incremental order the backend itself followed.
+  - `frontend/` scaffolded with Vite + React 18 + React Router + Axios, mirroring
+    PropertyManager's own frontend architecture (`C:\Users\shmil\Projects\
+    property-management-system\frontend`) file-for-file where InspectIQ's schema allows -
+    `api/client.js` (Axios instance, memory-only access token, sessionStorage refresh token,
+    silent-refresh-and-retry on 401), `contexts/AuthContext.jsx` (session restore on reload via
+    the stored refresh token), `routes/ProtectedRoute.jsx` (auth-gated, optionally
+    role-gated), `services/` (one file per resource, no component calls Axios directly),
+    `layouts/` (MainLayout/Header/Sidebar), `pages/`, `constants/roles.js` (mirrors
+    `app/security/roles.py` exactly), `utilities/` (apiError.js, permissions.js).
+  - **Two real, deliberate departures from the PropertyManager pattern being mirrored, not
+    oversights**: (1) `authService.js` sends lowercase `email`/`password` to
+    `/auth/login` (`app/schemas/auth.py`'s `LoginRequest`), not PropertyManager's PascalCase
+    `Email`/`Password` - InspectIQ's auth schema is the one deliberately-lowercase exception
+    among otherwise-PascalCase request bodies, confirmed by reading the schema, not assumed.
+    (2) There is no `logout()` API call - `app/api/auth.py` has no `POST /api/auth/logout`
+    endpoint at all (only login/refresh/me exist, unlike PropertyManager's backend), so
+    `AuthContext.logout` is purely client-side (clears tokens), documented in
+    `authService.js`'s own comment for why.
+  - `pages/DashboardPage.jsx` consumes the real `GET /api/dashboard` end-to-end (not a stub) -
+    doubles as the actual proof scaffold + auth works against the real backend, matching the
+    "verify against a real running server" discipline every backend phase held itself to.
+  - **CSP built into `index.html` from this first commit** (`PROJECT_PLAN.md §7`'s explicit
+    PropertyManager lesson: that project deferred CSP and paid for it twice). A real, reproduced
+    dev-only problem was found and fixed here, not assumed away: Vite's dev server injects live
+    CSS as an inline `<style>` tag for HMR (not a real external stylesheet the way `vite build`
+    emits) - a strict `style-src 'self'` blocked it outright, confirmed by both a genuine
+    "Applying inline style violates ... style-src" console error AND `getComputedStyle` showing
+    every button/card stuck on default unstyled browser chrome. Fixed with a mode-scoped CSP
+    variable (`frontend/.env.development` sets `style-src 'self' 'unsafe-inline'`,
+    `.env.production` keeps it strict at `'self'` - confirmed correct by actually running
+    `npm run build` and inspecting `dist/index.html`, which has a real
+    `<link rel="stylesheet">`, no inline tag). A second, NOT-fixable dev-mode-only gap was found
+    and documented rather than silently left unnoticed: Vite also prepends its own inline
+    React-Refresh-preamble `<script type="module">` at the very top of `<head>`, ahead of this
+    file's own CSP `<meta>` tag regardless of source order (confirmed by fetching the page's own
+    served HTML) - a `<meta>` CSP cannot govern content parsed before its own position, and this
+    is Vite's own trusted dev tooling that doesn't exist in a production build at all (confirmed
+    by inspecting `dist/index.html`), so it's accepted as a known dev-only limitation, not
+    something worth working around. Full story in `docs/AI_MEMORY.md`'s 2026-08-24 entry.
+  - **A real, unrelated CVE fixed before it became technical debt across 19 future pages**:
+    `npm audit` flagged `react-router-dom` 6.x for a moderate-severity open-redirect
+    advisory (CVE-2025-68470 bypass). Bumped to `^7.18.2` (`npm audit` now shows 0
+    vulnerabilities) - the classic component-based routing API this scaffold uses
+    (`BrowserRouter`/`Routes`/`Route`/`Outlet`/`NavLink`/`useNavigate`) is unchanged between v6
+    and v7, confirmed by the full login → dashboard → logout → 404 flow working identically
+    after the bump, not assumed compatible from the changelog alone.
+  - Mobile-first CSS (`src/styles/global.css`) with a single responsive `MainLayout` (off-canvas
+    `Sidebar` below 768px, toggled by a hamburger `Header` button; always-visible sticky sidebar
+    above it) - deliberately ONE shell for now, not `PROJECT_PLAN.md §6`'s eventual separate
+    desktop/mobile layout components, since only Dashboard exists so far and there's nothing yet
+    to differentiate a "field" vs. "management" navigation pattern; `Sidebar`/`Header` are
+    already their own components specifically so that split is a later two-file change, not a
+    rewrite, when it's actually needed.
+  - **Verified live, through the real running UI** (backend `uvicorn` + frontend `npm run dev`,
+    not just unit-level): real login as a Northgate Administrator → real dashboard data rendered
+    matching the exact backend response (`DueThisWeek=1`, `Overdue=1`, `TotalActiveProperties=3`,
+    `PropertiesRequiringAttention=1`) → full page reload preserved the session via a real
+    `POST /api/auth/refresh` call (no re-login) → logout → real redirect to `/login` → direct
+    navigation to `/` while logged out redirected to `/login` → an unknown URL rendered the 404
+    page → a second login as an Inspector (a role Dashboard doesn't restrict) also succeeded →
+    both servers stopped cleanly afterward.
+  - `.claude/launch.json`-equivalent: no per-repo file (the preview tooling reads the *primary
+    working directory's* `.claude/launch.json`, not one inside the InspectIQ repo itself - an
+    `inspectiq-frontend` entry was added there instead, alongside PropertyManager's pre-existing
+    `frontend` entry).
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Dashboard API) to git is the next action.
+- Nothing in progress. Committing this batch (React frontend scaffold + auth) to git is the next
+  action.
 
 ## Important decisions
 
@@ -696,23 +767,24 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Dashboard API) to git.
-2. **Phase 16 — React Frontend** (`prompts/frontend_prompt.md`, Prompt 16; scope's own text
-   verbatim there). This is the entire backend API surface's first consumer and a genuinely
-   different undertaking from every phase so far - a new stack (React/React Router/Axios), a
-   mobile-first UI (primary use case: an inspector walking a property on a phone), ~19 named
-   pages, and a dozen-plus named reusable components (StatusBadge, PhotoUploader,
-   InspectionQuestion, etc.) - not an incremental extension of the FastAPI backend pattern the
-   last 15 phases established. Every backend endpoint this phase would consume already exists and
-   is tested (124 tests, all passing, all against the real DB). Prompt 17 (the mobile inspection
-   screen specifically) is the next prompt after this one and is called out in scope as "the most
-   important screen in the application" - worth reading `prompts/frontend_prompt.md` in full
-   before starting either.
-   - Per this project's own established working style (`docs/AI_MEMORY.md`'s 2026-08-23 entry):
-     phase-gate at natural checkpoints for owner review rather than running the entire 20-phase
-     build unattended. The backend being fully feature-complete per scope, immediately before an
-     entirely different stack begins, is exactly that kind of checkpoint - confirm the frontend
-     scope/approach with the owner before writing any frontend code, rather than assuming.
+1. Commit this batch (React frontend scaffold + auth) to git.
+2. **Phase 16 continues — the remaining ~18 pages**, module-by-module, same incremental order
+   the backend itself followed (Properties+Units next, most likely, since they're the earliest
+   backend modules with no dependency on any other module's frontend existing first). Each
+   module's frontend needs: a `services/xService.js`, `constants/roles.js` additions (this
+   project's `CAN_VIEW_X`/`CAN_MANAGE_X` naming convention, mirrored from PropertyManager's),
+   List/Detail/Form pages where the module fits that CRUD shape, and a new nested
+   `<Route>`/`<ProtectedRoute allowedRoles={...}>` block in `App.jsx` - same pattern
+   `App.jsx`'s own module docstring describes. The Inspection module itself gets a bespoke
+   wizard flow instead (`PROJECT_PLAN.md §6`/§7), not this List/Detail/Form triad - that's
+   Prompt 17's "most important screen in the application," worth reading
+   `prompts/frontend_prompt.md` in full and planning deliberately before starting it, not
+   treating it as just another module.
+   - No further "pause for owner review" checkpoint is needed before continuing within Phase 16
+     itself - the owner already reviewed and approved starting Phase 16 (scaffold + auth), the
+     stack/architecture choices are made and proven working end-to-end, and the remaining work is
+     incremental module-by-module frontend building against an already-complete, already-tested
+     backend, not a new undertaking requiring fresh sign-off.
 
 ## Files that require attention
 

@@ -970,3 +970,102 @@ phase since Phase 7, exactly as `AI_HANDOFF.md`'s Phase 14 "Next tasks" entry pr
   `PropertiesRequiringAttention=1` matching the one demo property with an overdue
   `NextInspectionDue`) → confirmed `GET /api/dashboard` with no token returns a real 401 → server
   stopped cleanly.
+
+## 2026-08-24 — Phase 16 started: React frontend scaffold + auth
+
+Backend Phases 1-15 (the entire scope backend surface) were complete and pushed before this
+started. The owner explicitly chose to push to GitHub and start Phase 16 immediately rather than
+pause for review (`AskUserQuestion` offered both) - the "phase-gate at natural checkpoints"
+convention from 2026-08-23 doesn't mean pausing by default, it means offering the choice at a
+real checkpoint and following what the owner picks.
+
+**Mirrored PropertyManager's frontend architecture directly**
+(`C:\Users\shmil\Projects\property-management-system\frontend`), file-for-file where InspectIQ's
+own schema/backend allows, rather than designing a new pattern from scratch - `PROJECT_PLAN.md
+§6`'s folder structure (`api/`, `services/`, `contexts/`, `routes/`, `components/`, `layouts/`,
+`pages/`) already named this as the plan, but reading PropertyManager's actual working code (not
+just its own docs) surfaced concrete, validated implementation details worth reusing directly:
+the memory-access-token / sessionStorage-refresh-token split with a documented XSS-exposure
+tradeoff, the refresh-and-retry Axios interceptor with a shared in-flight-refresh promise (so N
+parallel 401s trigger one refresh call, not N), `ProtectedRoute`'s nested-route + optional
+`allowedRoles` shape, and the CSP-in-`index.html` pattern with its exact `%VITE_X%`
+env-replacement mechanism.
+
+**Two deliberate departures from the mirrored pattern, confirmed by reading InspectIQ's own
+backend code rather than assumed identical**: (1) `app/schemas/auth.py`'s `LoginRequest` uses
+lowercase `email`/`password` fields, unlike every other InspectIQ request body's PascalCase
+(matching DB columns) AND unlike PropertyManager's own PascalCase `Email`/`Password` - the
+frontend sends lowercase for login specifically, confirmed against the actual schema file, not
+guessed from the other pattern. (2) `app/api/auth.py` has no logout endpoint at all (only login/
+refresh/me) - `AuthContext.logout` is purely client-side, no wrapper call, documented in
+`authService.js`.
+
+**Real, reproduced CSP bug (not a hypothetical) found and fixed**: Vite's dev server injects
+live CSS as an inline `<style>` tag for HMR - not a real external stylesheet the way `vite build`
+emits (confirmed both ways: a strict `style-src 'self'` produced a genuine "Applying inline style
+violates ... style-src" console error AND `getComputedStyle` on a real button showed the
+browser's default UA styling, not anything from `global.css` - the page was functionally
+unstyled, not just noisy in the console). Fixed with `frontend/.env.development` (`style-src
+'self' 'unsafe-inline'`) vs. `.env.production` (`style-src 'self'`, unchanged) feeding a new
+`%VITE_CSP_STYLE_SRC%` token in `index.html` - confirmed the production side needs no relaxation
+by actually running `npm run build` and inspecting `dist/index.html`, which has a real `<link
+rel="stylesheet">`. **A second, related but NOT fixable gap was found the same way and
+documented rather than quietly worked around**: Vite's dev server also prepends an inline
+React-Refresh-preamble `<script type="module">` at the literal top of `<head>`, unconditionally
+ahead of this file's own authored tag order (confirmed by `fetch('/')`-ing the page's own served
+HTML from within the browser) - a `<meta>`-delivered CSP cannot govern anything parsed before its
+own position in the document, so `script-src 'self'` never actually covered this one script.
+Confirmed this doesn't exist in a production build at all (`dist/index.html` has no such tag), so
+it's Vite's own trusted dev-only tooling, accepted as a known limitation rather than something to
+route around by reordering source tags (which wouldn't work anyway - Vite prepends
+unconditionally regardless of authored order).
+
+**A real CVE fixed proactively, not left for a future security-review phase to find**: `npm
+audit` flagged `react-router-dom` 6.x (the version PropertyManager's own frontend still pins) for
+a moderate open-redirect advisory. Bumped to `^7.18.2` before writing any more pages on top of
+it - cheaper as the very first commit than after 18 more pages depend on the API. Confirmed the
+classic component-routing API this scaffold actually uses (`BrowserRouter`/`Routes`/`Route`/
+`Outlet`/`NavLink`/`useNavigate`) is unchanged between v6 and v7 by running the full login →
+dashboard → reload-session-restore → logout → 404 flow afterward, not by trusting the changelog
+alone. `npm audit` now reports 0 vulnerabilities.
+
+**One responsive layout, not `PROJECT_PLAN.md §6`'s eventual separate desktop/mobile layout
+components** - `MainLayout`/`Header`/`Sidebar` are already split into their own files
+specifically so that split is a later two-file change when a real "field" vs. "management"
+navigation difference actually exists to express; with only Dashboard built so far there's
+nothing to differentiate yet, so building the split prematurely would be guessing at a shape
+before there's a second page to inform it.
+
+**A real preview-tooling gotcha, worth remembering for any future InspectIQ frontend session**:
+the Browser-pane preview tooling reads `.claude/launch.json` from the *primary working
+directory* (`KnowledgeWork` in this session), not from a `.claude/launch.json` inside the
+InspectIQ repo itself - a first attempt at a repo-local launch config was silently ignored in
+favor of KnowledgeWork's pre-existing `frontend` entry (which pointed at PropertyManager's
+frontend, not InspectIQ's - confirmed by the served page's title reading "PropertyManager"
+instead of "InspectIQ"). Fixed by adding a distinctly-named `inspectiq-frontend` entry to
+KnowledgeWork's own `.claude/launch.json` instead, alongside the pre-existing `frontend` one, and
+deleting the unused repo-local file.
+
+**Verified live, through the real running UI** (real `uvicorn` backend + real `npm run dev`
+frontend, not just component-level checks): login as a real Northgate Administrator rendered
+real dashboard data matching the backend's own response exactly → a full page reload preserved
+the session via a real `POST /api/auth/refresh` call, no re-login needed → logout redirected to
+`/login` for real → direct navigation to `/` while logged out redirected to `/login` → an unknown
+URL rendered the 404 page → a second login as an Inspector (a role Dashboard doesn't restrict)
+also worked → both servers stopped cleanly. Mobile-viewport verification hit a real environment
+limitation worth remembering, not an app bug: this session's Browser pane wasn't compositing
+frames (confirmed by repeated screenshot/click-by-coordinate timeouts), which made
+`getBoundingClientRect`/`getComputedStyle` reads on the off-canvas sidebar unreliable
+*specifically right after* a click interaction while resized - the underlying CSS/React logic
+was independently confirmed correct through facts that don't depend on compositing: the
+`sidebar--open` class toggling correctly on click (checked via `className` and a real DOM
+`.click()` dispatch), the CSS rule itself confirmed via direct CSSOM inspection (correct
+selector, correct specificity, correct source order relative to the base rule), and the desktop
+breakpoint confirmed correct on a *fresh* (non-post-interaction) load
+(`position: sticky`/`left: 0`/hamburger hidden/roles shown, all matching `min-width: 768px`).
+**Standing lesson for future sessions using this same Browser-pane tooling**: if
+`getBoundingClientRect`/`getComputedStyle` produce a value that contradicts CSS you've already
+confirmed correct via CSSOM inspection, check whether the pane is actually compositing
+(screenshot/click-by-coordinate both timing out is the tell) before concluding it's a real app
+bug - a fresh page load's measurements were reliable here even when post-interaction ones
+weren't.
