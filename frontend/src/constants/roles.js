@@ -15,3 +15,12 @@ export const ALL_ROLES = [ADMINISTRATOR, MANAGER, INSPECTOR, MAINTENANCE, VIEWER
 // dashboard has no natural "mutate" action, so every module's read side lands here the same
 // way. No CAN_VIEW_DASHBOARD constant is needed as a result; ProtectedRoute for "/" is used
 // without an `allowedRoles` prop.
+
+// Properties + Units: view = any authenticated company member (app/api/properties.py's own
+// module docstring - the schema has no per-property assignment table, so "Inspectors can view
+// properties they have permission to inspect" is interpreted as company membership), mutate =
+// Administrator/Manager only. No CAN_VIEW_PROPERTIES constant, same reasoning as Dashboard -
+// every role needs it, so ProtectedRoute is used without `allowedRoles` for the view routes.
+// Units share the exact same shape (app/api/units.py's own docstring says so explicitly), so
+// one constant covers both - no separate CAN_MANAGE_UNITS.
+export const CAN_MANAGE_PROPERTIES = [ADMINISTRATOR, MANAGER];

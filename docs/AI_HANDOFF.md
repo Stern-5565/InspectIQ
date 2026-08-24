@@ -648,11 +648,52 @@ Current status. Overwrite/update this file at the end of every session or phase 
     working directory's* `.claude/launch.json`, not one inside the InspectIQ repo itself - an
     `inspectiq-frontend` entry was added there instead, alongside PropertyManager's pre-existing
     `frontend` entry).
+- **Phase 16 continued — Properties + Units frontend module**, the first full List/Detail/Form
+  module (Dashboard has no such shape - a dashboard has no create/edit). Ported PropertyManager's
+  shared component library (`PageHeader`/`DataTable`/`Pagination`/`SearchInput`/`FilterPanel`/
+  `SelectField`/`FormField`/`FieldShell`/`DateField`/`ErrorMessage`/`EmptyState`/
+  `ConfirmationDialog`/`Toast`/`StatusBadge`) into `frontend/src/components/`, file-for-file
+  where InspectIQ's own schema allows - these are now the reusable base every future module's
+  frontend builds on, not re-ported per module.
+  - `frontend/src/constants/propertyOptions.js`/`unitOptions.js` mirror
+    `app/schemas/enums.py`'s `PropertyType`/`PropertyStatus`/`InspectionFrequency`/
+    `OccupancyStatus` value strings exactly (sent straight through to Pydantic, which 422s on
+    anything else). `constants/roles.js` gained `CAN_MANAGE_PROPERTIES` - no
+    `CAN_VIEW_PROPERTIES`, same "every role needs it" reasoning as Dashboard, confirmed against
+    `app/api/properties.py`'s own module docstring (view = any company member, mutate =
+    Administrator/Manager only, both Properties and Units - one constant covers both).
+  - `services/propertyService.js`, `unitService.js` wrap `/api/properties` and
+    `/api/properties/{id}/units` + `/api/units/{id}` respectively.
+  - `pages/properties/PropertiesListPage.jsx`, `PropertyDetailPage.jsx`, `PropertyFormPage.jsx` -
+    the List/Detail/Form triad. **Units have no list/detail/form pages of their own** - scope's
+    own named page list ("Properties, Property Details," `prompts/frontend_prompt.md`) has no
+    separate Units module, and the backend's own routes are nested under a property
+    (`/api/properties/{id}/units`), not standalone - so unit management (add/edit/change
+    occupancy) lives entirely inside `PropertyDetailPage` as an embedded section, matching the
+    backend's own nesting rather than inventing a flat module the scope/API don't have.
+  - `PropertyFormPage`'s `AlarmAccessCode` field uses `type="password"` with a show/hide toggle,
+    and `PropertyDetailPage` masks it behind a "Show" button by default - the backend still
+    stores it as plaintext (`docs/DATABASE.md §10.4`, a real, documented, not-yet-mitigated
+    risk this doesn't fix), but there was no reason for the frontend to also leave it sitting in
+    plain view on screen once it became the first UI to actually touch that field.
+  - **Verified live, through the real running UI** as a real Administrator: created a property
+    with the full 17-field form → added a unit → changed its occupancy status (persisted,
+    re-confirmed via the real API response, not just local state) → inline-edited the unit's
+    tenant name (persisted) → edited the property itself, including its status → deactivated it
+    (confirmation dialog → real `POST /deactivate` → correctly hidden from the default list,
+    correctly shown with "Include deactivated") → confirmed a Bright Spaces Administrator gets a
+    real "Property not found." on the same URL (cross-company isolation, exercised through the
+    UI, not just the API directly) → confirmed no page-level horizontal overflow at a 375px
+    mobile viewport (the units/properties table scrolls within its own wrapper instead) → all
+    test data cleaned up from the real DB afterward (including the property's 3 auto-seeded
+    `CleaningAreas` from Phase 11 - the first hard-delete cleanup this session hit that FK, since
+    Properties has no soft-delete-only trigger the way `InspectionTemplates`/Sections/Questions
+    do) → both servers stopped cleanly.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (React frontend scaffold + auth) to git is the next
-  action.
+- Nothing in progress. Committing this batch (Properties + Units frontend module) to git is the
+  next action.
 
 ## Important decisions
 
@@ -767,22 +808,24 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (React frontend scaffold + auth) to git.
-2. **Phase 16 continues — the remaining ~18 pages**, module-by-module, same incremental order
-   the backend itself followed (Properties+Units next, most likely, since they're the earliest
-   backend modules with no dependency on any other module's frontend existing first). Each
-   module's frontend needs: a `services/xService.js`, `constants/roles.js` additions (this
-   project's `CAN_VIEW_X`/`CAN_MANAGE_X` naming convention, mirrored from PropertyManager's),
-   List/Detail/Form pages where the module fits that CRUD shape, and a new nested
-   `<Route>`/`<ProtectedRoute allowedRoles={...}>` block in `App.jsx` - same pattern
-   `App.jsx`'s own module docstring describes. The Inspection module itself gets a bespoke
-   wizard flow instead (`PROJECT_PLAN.md §6`/§7), not this List/Detail/Form triad - that's
-   Prompt 17's "most important screen in the application," worth reading
-   `prompts/frontend_prompt.md` in full and planning deliberately before starting it, not
-   treating it as just another module.
+1. Commit this batch (Properties + Units frontend module) to git.
+2. **Phase 16 continues — Inspection Templates next** (read-only list + detail, mirroring the
+   backend's own Phase 7 scope), then the Inspection engine itself (Prompt 17's "most important
+   screen in the application" - a bespoke wizard flow per `PROJECT_PLAN.md §6`/§7, NOT the
+   List/Detail/Form triad Properties used - worth reading `prompts/frontend_prompt.md` in full
+   and planning deliberately before starting it, not treating it as just another module). After
+   that: Maintenance, Risk, Cleaning, Vacant Units, Meter Readings, Admin Settings - same
+   incremental order the backend itself followed. Each CRUD-shaped module's frontend now has a
+   proven template to follow: `services/xService.js`, `constants/roles.js` additions
+   (`CAN_MANAGE_X`, and `CAN_VIEW_X` only where the backend actually restricts viewing - most
+   modules don't), List/Detail/Form pages built from the shared component library in
+   `components/` (now real and reusable, not per-module scaffolding), and a new nested
+   `<Route>`/`<ProtectedRoute allowedRoles={...}>` block in `App.jsx` plus a `Sidebar` link -
+   same pattern `App.jsx`'s own module docstring describes.
    - No further "pause for owner review" checkpoint is needed before continuing within Phase 16
      itself - the owner already reviewed and approved starting Phase 16 (scaffold + auth), the
-     stack/architecture choices are made and proven working end-to-end, and the remaining work is
+     stack/architecture/shared-component choices are made and proven working end-to-end
+     (Properties + Units exercised the full CRUD template live), and the remaining work is
      incremental module-by-module frontend building against an already-complete, already-tested
      backend, not a new undertaking requiring fresh sign-off.
 

@@ -8,11 +8,15 @@
  *   header shell once, around whichever page is active (see layouts/MainLayout.jsx).
  * - "*" catches any URL that doesn't match one of the routes above.
  *
- * Only Dashboard exists as a real page so far - this file grows one nested <Route> block per
- * module as each module's frontend gets built (same incremental order as the backend), the
- * same shape PropertyManager's App.jsx used across its own modules. Dashboard needs no
- * `allowedRoles` (constants/roles.js - GET /api/dashboard has no role gate at all), so it's the
- * one route so far NOT wrapped in a second, role-narrowing ProtectedRoute.
+ * Dashboard + Properties/Units exist as real pages so far - this file grows one nested <Route>
+ * block per module as each module's frontend gets built (same incremental order as the
+ * backend), the same shape PropertyManager's App.jsx used across its own modules. Dashboard
+ * needs no `allowedRoles` (constants/roles.js - GET /api/dashboard has no role gate at all), so
+ * it's the one route NOT wrapped in a second, role-narrowing ProtectedRoute. Properties' VIEW
+ * routes are the same way (no CAN_VIEW_PROPERTIES exists - any company member can view); only
+ * the create/edit routes are nested under a second ProtectedRoute with
+ * `allowedRoles={CAN_MANAGE_PROPERTIES}`. Units have no routes of their own - they're managed
+ * entirely from within PropertyDetailPage (see that file's own header comment for why).
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -23,6 +27,10 @@ import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { UnauthorizedPage } from "./pages/UnauthorizedPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { PropertiesListPage } from "./pages/properties/PropertiesListPage";
+import { PropertyDetailPage } from "./pages/properties/PropertyDetailPage";
+import { PropertyFormPage } from "./pages/properties/PropertyFormPage";
+import { CAN_MANAGE_PROPERTIES } from "./constants/roles";
 
 export function App() {
   return (
@@ -36,6 +44,14 @@ export function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<MainLayout />}>
                 <Route path="/" element={<DashboardPage />} />
+
+                <Route path="/properties" element={<PropertiesListPage />} />
+                <Route path="/properties/:id" element={<PropertyDetailPage />} />
+
+                <Route element={<ProtectedRoute allowedRoles={CAN_MANAGE_PROPERTIES} />}>
+                  <Route path="/properties/new" element={<PropertyFormPage />} />
+                  <Route path="/properties/:id/edit" element={<PropertyFormPage />} />
+                </Route>
               </Route>
             </Route>
 

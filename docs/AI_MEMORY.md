@@ -1069,3 +1069,54 @@ confirmed correct via CSSOM inspection, check whether the pane is actually compo
 (screenshot/click-by-coordinate both timing out is the tell) before concluding it's a real app
 bug - a fresh page load's measurements were reliable here even when post-interaction ones
 weren't.
+
+## 2026-08-24 — Properties + Units frontend module (Phase 16 continued)
+
+The first full List/Detail/Form module - Dashboard had no create/edit shape to prove the
+pattern against. Ported PropertyManager's shared component library into
+`frontend/src/components/` (PageHeader, DataTable, Pagination, SearchInput, FilterPanel,
+SelectField, FormField, FieldShell, DateField, ErrorMessage, EmptyState, ConfirmationDialog,
+Toast, StatusBadge) rather than building bespoke UI for this one module - these are now real,
+reusable infrastructure for every future module's frontend, not a one-off. Read PropertyManager's
+actual component source (not just recalled its shape) to port it faithfully, the same "read the
+real code, don't guess from memory" discipline as the earlier scaffold+auth session.
+
+**A real design decision, not an oversight**: Units have no list/detail/form pages of their own.
+Two independent signals pointed the same direction: scope's own named page list
+(`prompts/frontend_prompt.md`, Prompt 16's verbatim text) names "Properties, Property Details"
+but no separate Units page, and the backend's own routes are nested under a property
+(`/api/properties/{id}/units`, `/api/units/{id}`), never a flat `/api/units` collection endpoint.
+So unit management (add, inline-edit UnitNumber/Floor/TenantOccupierName/Notes, change
+OccupancyStatus) lives entirely inside `PropertyDetailPage` as an embedded section with its own
+small inline-edit-row and add-unit-form sub-components, matching the backend's own nesting
+rather than inventing a flat frontend module the scope/API don't have.
+
+**`AlarmAccessCode` handled with a bit more care than a plain text field, given
+`docs/DATABASE.md §10.4` flags it as a real, documented, not-yet-mitigated plaintext-storage
+risk**: `PropertyFormPage` uses `type="password"` with a show/hide toggle, and
+`PropertyDetailPage` masks it behind a "Show" button by default rather than rendering it in the
+open. This doesn't fix the backend's plaintext storage (out of scope for a frontend module) - it
+just means the first UI to actually touch this field doesn't gratuitously make the exposure
+worse by leaving it sitting in plain view on screen when it doesn't have to.
+
+**Verified live, through the real running UI, as a real Administrator** (not just reading the
+code and assuming it works): created a property through the full 17-field form → added a unit →
+changed its occupancy status and confirmed the UI re-rendered from the real API response (not
+just local optimistic state) → inline-edited the unit's tenant name, persisted → edited the
+property itself (name + status) → deactivated it via the confirmation dialog → confirmed it
+correctly disappeared from the default list and reappeared with "Include deactivated" → switched
+to a real Bright Spaces Administrator and confirmed a real "Property not found." on the exact
+same URL (cross-company isolation exercised through the actual UI navigation, not just curl
+against the API directly) → confirmed no page-level horizontal scroll at a 375px mobile
+viewport, the table scrolling within its own `.data-table-wrapper` instead (the mobile-first
+"wide content scrolls in its own container, not the page" rule applied for the first time to
+real tabular data, not just the dashboard's stat cards).
+
+**A real cleanup gotcha, not a bug**: hard-deleting the manually-created test property hit
+`FK_CleaningAreas_Properties` on the first attempt - `property_service.create_property` (Phase
+11) auto-seeds 3 default `CleaningAreas` for every new property, which this session's own memory
+of "Properties has no soft-delete-only trigger" didn't account for on the first try. Fixed by
+deleting the `CleaningAreas` rows before the property, same FK-ordering discipline every backend
+phase's own test cleanup already uses (e.g. MeterReadings→MediaFiles from the Phase 14 entry) -
+confirmed the failed first attempt rolled back atomically (nothing was left half-deleted) before
+retrying with the corrected order.
