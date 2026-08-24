@@ -224,8 +224,8 @@ Current status. Overwrite/update this file at the end of every session or phase 
     module-public for this reuse). Caption-edit/delete are narrower still: uploader or
     Admin/Manager only. `SUPPORTED_ENTITY_TYPES` originally excluded MeterReading/
     MaintenanceIssue/RiskAssessment/CleaningInspection, whose own services didn't exist yet;
-    MaintenanceIssue was added in Phase 10 (see below) — MeterReading/RiskAssessment/
-    CleaningInspection are still deferred to Phases 11/13/14.
+    MaintenanceIssue (Phase 10) and CleaningInspection (Phase 11, see below) have since been
+    added — MeterReading/RiskAssessment are still deferred to Phases 13/14.
   - `app/repositories/inspection_response_repository.py` gained
     `get_response_by_id_for_company` — the one function there that takes `company_id` directly
     (documented as a deliberate exception to the file's own "no company_id param" rule), needed
@@ -304,6 +304,67 @@ Current status. Overwrite/update this file at the end of every session or phase 
     issue → all test data cleaned up from the DB and `backend/uploads/` afterward (confirming the
     `SET ANSI_NULLS ON`/`SET QUOTED_IDENTIFIER ON` gotcha from Phase 2 still applies to any
     hand-written cleanup script touching `MaintenanceIssues`, which carries a filtered index).
+- **Phase 11 (Communal Cleaning Grading) complete**, per scope §16. No new SQL —
+  `CleaningAreas`/`CleaningInspections` have existed since Phase 2.
+  - `app/models/cleaning_area.py`, `cleaning_inspection.py` — added to `models/__init__.py` and
+    sanity-queried before any route was written. Neither table has a denormalized `CompanyId`
+    (unlike MediaFiles/MaintenanceIssues) — `app/repositories/cleaning_repository.py` joins
+    through `Properties` for `CleaningArea` isolation and through `Inspections`→`Properties` for
+    `CleaningInspection` isolation.
+  - **Two tiers, deliberately simpler than Maintenance's three** — see
+    `app/services/cleaning_service.py`'s module docstring: `CleaningAreas` (per-property config)
+    mirror Properties/Units exactly (view = any company member, mutate = Admin/Manager,
+    route-gated). `CleaningInspections` (grading records, always tied to a real `Inspection` —
+    `InspectionId` is `NOT NULL` by design) mirror the Inspection engine instead: view = any
+    company member, mutate = the inspection's own assigned inspector or Admin/Manager, reusing
+    `inspection_service.ensure_can_edit` directly — no independent "assignee can edit" carve-out
+    the way MaintenanceIssue has one, since there's no "Cleaner" role in this system and
+    `AssignedUserId` here just names who should do the work, not who's authorized to grade it.
+    Locked with the same 409 once the parent Inspection is `Submitted`.
+  - **Closed a real, previously-flagged gap**: `docs/DATABASE.md §10`'s "Possible Problems" #5
+    warned that a new property gets zero `CleaningAreas` until someone configures them — noted
+    at Phase 1 as "decide during Phase 6," but Phase 6 shipped without addressing it.
+    `property_service.create_property` now calls
+    `cleaning_service.seed_default_areas_for_property` right after creating a property, seeding
+    the exact 3-area default (Entrance/Hallway/BinArea) `DATABASE.md` itself suggested. Existing
+    pre-Phase-11 seeded demo properties are unaffected (only newly-created ones get seeded) —
+    "15 High Road" has no communal areas of its own (it's an HMO); "Elm Court" does, from the
+    original Phase 2 demo data.
+  - **A second real circular-import situation, resolved two different ways depending on
+    direction**: `property_service.create_property` needs `cleaning_service` (to seed areas) —
+    a function-LOCAL import, mirroring Phase 10's `media_service`↔`maintenance_service` pattern,
+    since `cleaning_service` imports `property_service` at the top level for its own
+    authorization checks. But `media_service`'s new `CleaningInspection` entity-type resolver
+    uses a plain TOP-level import of `cleaning_service` instead — there's no cycle on that side,
+    since `cleaning_service` never needs to import `media_service` back (no photo-upload
+    convenience wrapper was needed here, unlike Maintenance's). Worth remembering: the fix isn't
+    "always use a local import for cross-service calls," it's "use one only where an actual
+    cycle exists" — confirmed by checking each direction independently rather than copying the
+    Phase 10 workaround by default.
+  - `app/api/cleaning.py` — `POST/GET /api/properties/{id}/cleaning-areas`,
+    `PATCH /api/cleaning-areas/{id}`, `POST/GET /api/inspections/{id}/cleaning`,
+    `PATCH /api/cleaning-inspections/{id}` — one router with mixed paths and no shared prefix,
+    the same pattern `units.py` already established for a sub-resource nested under two
+    different parents.
+  - 12 new tests (85 total), all against the real DB with areas/inspections/media cleaned up
+    per-test: auto-seed-on-create (3 areas, correct types), area create/update role gating and
+    cross-company 404, grade-create as the assigned inspector, `AssignedUserId` at create time
+    starting `Status="Assigned"`, a `CleaningAreaId` from a different property rejected 422, an
+    unassigned inspector 403, grading a `Submitted` inspection 409, a partial `PATCH` proven to
+    leave other fields untouched, and a photo uploaded through the *generic* `/api/media`
+    endpoint with `EntityType="CleaningInspection"` — proving that integration end-to-end, not
+    just at the import level.
+  - **A real test-fixture gap, not an app bug**: an early test fixture assumed the demo property
+    "15 High Road" would have an `Entrance` `CleaningArea` (it doesn't — only "Elm Court" got
+    seeded communal areas in Phase 2's demo data, and Phase 11's auto-seed only applies to newly
+    created properties). Fixed by having the fixture create its own throwaway area rather than
+    depending on which demo property happens to have one.
+  - **Verified live**: created a real property via curl → confirmed exactly 3 auto-seeded areas
+    → started a real inspection → graded a communal area (`Pending`) → a Bright Spaces admin got
+    404 on the cleaning list → an Admin override updated the grade to `Completed` → a real photo
+    uploaded via `EntityType=CleaningInspection` appeared in the generic media list → all test
+    data (property, areas, inspection, responses, cleaning grade, media row and file) cleaned up
+    afterward.
 
 ## Currently being worked on
 
@@ -383,19 +444,26 @@ tuple — not just one of the three (MaintenanceIssue in Phase 10 is the referen
 **When two services each need to call the other, use a function-local import on (at least) one
 side rather than restructuring the module boundary** — confirmed working, not just theoretical,
 by `media_service`↔`maintenance_service` in Phase 10 (see either file for the exact pattern and
-the comment explaining which side owns the local import and why).
+the comment explaining which side owns the local import and why). **But check each direction
+independently before reaching for that workaround** — Phase 11's `property_service`→
+`cleaning_service` call needed it (a real cycle, since `cleaning_service` imports
+`property_service`), while `media_service`→`cleaning_service` didn't (no cycle exists, since
+`cleaning_service` never needs `media_service`) — a plain top-level import was correct there,
+and using a local one anyway would just be needless caution copied from Phase 10 without
+re-checking it actually applies.
 
 ## Next tasks
 
-1. Commit this batch (Maintenance Issue System) to git.
-2. Phase 11 — Communal Cleaning Grading (`prompts/backend_prompt.md`, Prompt 12):
-   `CleaningAreas`/`CleaningInspections` models (tables already exist, Phase 2 — per-property
-   configurable area list, not a fixed global enum, see `docs/DATABASE.md`'s `CleaningAreas`
-   entry), grading (A–E per scope §16), flagging cleaning-required/urgent, optional assignment.
-   `EntityType="CleaningInspection"` should be added to `media_service.py`'s `_VIEW_CHECKS`/
-   `_MUTATE_CHECKS` once this phase's service exists, following the exact Phase 10
-   `MaintenanceIssue` pattern (including its local-import workaround if this service also needs
-   to call into `media_service` directly, e.g. for a completion photo).
+1. Commit this batch (Communal Cleaning Grading) to git.
+2. Phase 12 — Vacant Unit Inspection (`prompts/backend_prompt.md`, Prompt 13):
+   `VacantUnitInspections` model (table already exists, Phase 2 — its own table, not a generic
+   `InspectionResponse`, since scope §13 needs history without overwriting the unit's current
+   status and the field set — electricity/water/heating on/off etc. — doesn't fit the generic
+   Yes/No/Text/Number shape, per `docs/DATABASE.md`). Likely follows the Phase 11 shape (tied to
+   a real `Inspection`, graded/checked by the assigned inspector or Admin/Manager) more than
+   Maintenance's three-tier one — check `docs/DATABASE.md`'s `VacantUnitInspections` entry and
+   scope §13 in full before assuming, the same way each prior phase re-derived its own shape
+   instead of copying the previous module's by default.
 
 ## Files that require attention
 

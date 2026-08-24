@@ -525,3 +525,102 @@ same `SET ANSI_NULLS ON`/`SET QUOTED_IDENTIFIER ON` preamble documented since Ph
 (`MaintenanceIssues` carries a filtered index), re-confirming that gotcha is still very much
 alive for any hand-written script touching this table, three phases and one live-server session
 after it was first documented.
+
+## 2026-08-24 — Phase 11 (Communal Cleaning Grading) built, closed a Phase-1-flagged gap
+
+Built the cleaning module per scope §16. `CleaningAreas`/`CleaningInspections` were already real
+tables since Phase 2 (`database/tables/04_InspectionTables.sql`), so like Phases 9 and 10, this
+is entirely application code - no new SQL.
+
+**Two authorization tiers, deliberately simpler than Maintenance's three - the fourth distinct
+shape this project has needed, and the first time a module was consciously kept SIMPLER than an
+available template rather than matching it.** `CleaningAreas` (a property's configurable area
+list) mirrors Properties/Units exactly: any company member views, Administrator/Manager
+mutates, gated at the route level - it's property configuration, not day-to-day work.
+`CleaningInspections` (the actual grading records) mirrors the Inspection engine's own shape
+instead: any company member views, the inspection's assigned inspector or Admin/Manager mutates,
+reusing `inspection_service.ensure_can_edit` directly with no independent carve-out. That last
+point is the interesting one: MaintenanceIssue's `AssignedUserId` gets its own "assignee can
+edit" tier because assigning work to a person and then letting that person update their own
+work is exactly what scope's Maintenance flow describes. `CleaningInspection.AssignedUserId`
+looks identical at the schema level, but this system has no "Cleaner" role at all (scope's 5
+roles - Administrator/Manager/Inspector/Maintenance/Viewer - don't include one), and §16 never
+describes a cleaner logging in to update their own grading record the way §17 describes a
+Maintenance User updating their own ticket. Copying Maintenance's three-tier shape here would
+have been inventing a permission model scope never asked for; the two-tier Inspection-engine
+shape is what the actual requirement supports. Worth remembering for Phase 12 (Vacant Unit
+Inspection) and beyond: a new module resembling a previous one at the schema level does not
+mean it should copy that module's authorization shape - re-derive it from what the module
+actually represents, the same standing rule from Phase 8, applied here in the other direction
+(simplifying down, not complicating up).
+
+**Closed a real gap flagged all the way back at Phase 1, not a new one found this session.**
+`docs/DATABASE.md §10`'s "Possible Problems" #5 said outright: "`CleaningAreas` is per-property,
+so a new property has zero cleaning areas until someone configures them - a real onboarding gap
+if not handled... Decide during Phase 6 (Properties + Units) - noting it here so it isn't
+forgotten." Phase 6 shipped without deciding it. Phase 11 - the phase that actually makes
+`CleaningAreas` functional for the first time - was the right moment to close it:
+`property_service.create_property` now calls a new
+`cleaning_service.seed_default_areas_for_property` immediately after creating a property,
+seeding exactly the 3-area default (`Entrance`/`Hallway`/`BinArea`) `DATABASE.md` itself already
+suggested - not a new invented list, the one that was proposed and shelved. This is the second
+time in this project a flagged-but-deferred item got closed at the moment its dependency
+finally existed (the first was MediaFiles waiting from Phase 2 to Phase 9) - worth treating
+`docs/DATABASE.md §10`'s whole "Possible Problems" list as a standing punch list to revisit at
+the start of any future phase, not just a one-time read.
+
+**A second circular-import situation, resolved two different ways after checking each direction
+separately - the useful lesson here is the checking, not a new technique.** `property_service`
+needed to call `cleaning_service.seed_default_areas_for_property`, but `cleaning_service` already
+imports `property_service` at the top level for its own `CleaningArea` authorization checks - a
+real cycle, resolved with the exact same function-local-import pattern Phase 10 established for
+`media_service`↔`maintenance_service`. But `media_service`'s new `CleaningInspection` entity-type
+resolver (`_view_cleaning_inspection`/`_mutate_cleaning_inspection`) needed `cleaning_service`
+too, and here a plain top-level import worked fine - `cleaning_service` has no reason to import
+`media_service` back, since (unlike `maintenance_service.upload_photo`) nothing in the cleaning
+module needs its own photo-upload convenience wrapper; the generic `/api/media` endpoint with
+`EntityType="CleaningInspection"` is the only upload path, and that's sufficient for what scope
+§16 actually asks for ("Pictures," no before/after distinction, no audit-trail requirement to
+hook into). The mistake this avoided: reflexively adding a local import "just in case," copying
+Phase 10's fix without re-verifying a cycle actually existed on this side. It didn't, so it
+wasn't used.
+
+**`create_cleaning_inspection` validates `CleaningAreaId` belongs to the inspection's own
+`PropertyId`**, the same defensive pattern Phase 10's `create_issue` used for `UnitId` - a
+`CleaningAreaId` from a different property in the same company would otherwise silently attach
+a grading record to the wrong property's checklist, a real (if company-internal) data-integrity
+bug, not just an inconsistency.
+
+12 new tests (85 total), all against the real DB with areas/inspections/media cleaned up
+per-test: the auto-seed-on-create behavior itself (3 areas, correct `AreaType` values, all
+active), area create/update role gating and cross-company 404, grading as the assigned
+inspector, an `AssignedUserId` supplied at create time starting the record at `Status="Assigned"`
+instead of `"Pending"` (mirroring Phase 10's exact convention), a `CleaningAreaId` from a
+different property rejected with 422, an unassigned inspector getting 403, grading a `Submitted`
+inspection rejected with 409 (the same immutability rule `InspectionResponses` use, applied here
+for the first time to a sibling table rather than the responses themselves), a partial `PATCH`
+proven to leave untouched fields alone, and - the integration-proving test - a photo uploaded
+through the *generic* `/api/media` endpoint with `EntityType="CleaningInspection"` that then
+correctly appears in a plain `GET /api/media?entity_type=CleaningInspection...` call, confirming
+the new dispatch entry actually works end-to-end and not just at the import level.
+
+**A real test-fixture gap, not an app bug, caught before it ever reached CI.** An early version
+of the `northgate_area_id` fixture assumed the demo property "15 High Road" would have an
+`Entrance` `CleaningArea` to reuse. It doesn't - only "Elm Court" (a block of flats) got seeded
+communal areas in Phase 2's original demo data; "15 High Road" is an HMO with none, and Phase
+11's new auto-seed-on-create only applies to properties created from now on, not retroactively
+to existing seeded ones. The fixture returned `None`, which then produced a cascade of confusing
+422s in every dependent test rather than one clear failure. Fixed by having the fixture create
+and tear down its own throwaway `CleaningArea` directly, removing the dependency on which demo
+property happens to have pre-seeded ones - a more robust pattern worth preferring generally when
+a fixture's needed data isn't guaranteed to exist in every environment the tests might run in.
+
+**Verified live**: created a real property via curl and confirmed exactly 3 auto-seeded areas
+with the right names/types → started a real inspection on that property → graded a communal area
+(`Grade=D`, `CleaningRequired=true`, starting `Status="Pending"`) → a Bright Spaces admin got 404
+listing that inspection's cleaning grades → an Administrator (not the assigned inspector) used
+the Admin-override path to move the grade to `Completed` → a real photo uploaded via curl with
+`EntityType=CleaningInspection` showed up in the generic media list → all of it (property,
+auto-seeded areas, inspection, its 102 snapshot responses, the cleaning grade, the media row and
+its file on disk) cleaned up afterward, using the same `SET ANSI_NULLS ON`/`SET QUOTED_IDENTIFIER
+ON` preamble every hand-written script against this schema has needed since Phase 2.

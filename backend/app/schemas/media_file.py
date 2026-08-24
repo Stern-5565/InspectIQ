@@ -4,7 +4,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Kept in sync by hand with app/services/media_service.py's SUPPORTED_ENTITY_TYPES - see that
 # module's docstring for why this list is narrower than scope §20's full set for now.
-ENTITY_TYPES = ("Property", "Unit", "Inspection", "InspectionResponse", "MaintenanceIssue")
+ENTITY_TYPES = (
+    "Property",
+    "Unit",
+    "Inspection",
+    "InspectionResponse",
+    "MaintenanceIssue",
+    "CleaningInspection",
+)
 
 
 class MediaFileResponse(BaseModel):

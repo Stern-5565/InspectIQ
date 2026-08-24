@@ -14,6 +14,8 @@ exactly this reason, and each one is sanity-queried against real data before any
 written that depends on it (Phase 7 onward).
 """
 from app.models.base import Base
+from app.models.cleaning_area import CleaningArea
+from app.models.cleaning_inspection import CleaningInspection
 from app.models.company import Company
 from app.models.inspection import Inspection
 from app.models.inspection_question import InspectionQuestion
@@ -30,6 +32,8 @@ from app.models.user import User, user_roles
 
 __all__ = [
     "Base",
+    "CleaningArea",
+    "CleaningInspection",
     "Company",
     "Inspection",
     "InspectionQuestion",

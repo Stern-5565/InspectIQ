@@ -82,3 +82,31 @@ class MaintenanceIssueStatus(str, Enum):
     WAITING = "Waiting"
     COMPLETED = "Completed"
     CLOSED = "Closed"
+
+
+class CleaningAreaType(str, Enum):
+    ENTRANCE = "Entrance"
+    HALLWAY = "Hallway"
+    STAIRCASE = "Staircase"
+    LANDING = "Landing"
+    COMMUNAL_KITCHEN = "CommunalKitchen"
+    COMMUNAL_BATHROOM = "CommunalBathroom"
+    BIN_AREA = "BinArea"
+    GARDEN = "Garden"
+    LAUNDRY_AREA = "LaundryArea"
+    LIFT = "Lift"
+    OTHER = "Other"
+
+
+class CleaningGrade(str, Enum):
+    A = "A"
+    B = "B"
+    C = "C"
+    D = "D"
+    E = "E"
+
+
+class CleaningInspectionStatus(str, Enum):
+    PENDING = "Pending"
+    ASSIGNED = "Assigned"
+    COMPLETED = "Completed"

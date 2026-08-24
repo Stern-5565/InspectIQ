@@ -10,10 +10,34 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.cleaning_area import CleaningArea
 from app.models.property import Property
 from tests.conftest import auth_headers, delete_user, make_user
+
+
+def _delete_property(db_session: Session, property_id: int) -> None:
+    # Every real property now gets 3 auto-seeded CleaningAreas (Phase 11,
+    # property_service.create_property -> cleaning_service.seed_default_areas_for_property) -
+    # those must go first, or the plain Property delete below hits their FK.
+    db_session.query(CleaningArea).filter(CleaningArea.PropertyId == property_id).delete()
+    db_session.query(Property).filter(Property.PropertyId == property_id).delete()
+    db_session.commit()
+
+
+def _delete_property_by_name(db_session: Session, property_name: str) -> None:
+    """Safe to call even if creation never happened (a no-op) - for cleanup in a `finally`
+    where the POST under test might itself have failed before a PropertyId was ever returned."""
+    property_ids = [
+        pid
+        for (pid,) in db_session.execute(
+            select(Property.PropertyId).where(Property.PropertyName == property_name)
+        ).all()
+    ]
+    for property_id in property_ids:
+        _delete_property(db_session, property_id)
 
 
 @pytest.fixture
@@ -121,8 +145,7 @@ def test_create_property_as_administrator_succeeds(
         assert body["CompanyId"] == northgate_admin.CompanyId
         assert body["IsActive"] is True
     finally:
-        db_session.query(Property).filter(Property.PropertyName == "Test Property TMP").delete()
-        db_session.commit()
+        _delete_property_by_name(db_session, "Test Property TMP")
 
 
 def test_create_property_as_inspector_returns_403(client: TestClient, northgate_inspector) -> None:
@@ -170,8 +193,7 @@ def test_update_property_changes_only_supplied_fields(
         assert body["GeneralNotes"] == "original notes"  # untouched
         assert body["PropertyName"] == "Test Property TMP"  # untouched
     finally:
-        db_session.query(Property).filter(Property.PropertyId == property_id).delete()
-        db_session.commit()
+        _delete_property(db_session, property_id)
 
 
 def test_deactivate_property_hides_it_from_default_list_but_not_direct_lookup(
@@ -201,5 +223,4 @@ def test_deactivate_property_hides_it_from_default_list_but_not_direct_lookup(
         direct_lookup = client.get(f"/api/properties/{property_id}", headers=headers)
         assert direct_lookup.status_code == 200
     finally:
-        db_session.query(Property).filter(Property.PropertyId == property_id).delete()
-        db_session.commit()
+        _delete_property(db_session, property_id)

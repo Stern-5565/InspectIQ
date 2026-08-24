@@ -54,7 +54,19 @@ def get_property(db: Session, current_user: User, property_id: int) -> Property:
 def create_property(db: Session, current_user: User, payload: PropertyCreate) -> Property:
     data = {field: _to_plain(value) for field, value in payload.model_dump().items()}
     property_ = Property(CompanyId=current_user.CompanyId, CreatedBy=current_user.UserId, **data)
-    return repo.create_property(db, property_)
+    property_ = repo.create_property(db, property_)
+
+    # Local import, not top-level: cleaning_service imports property_service (for its own
+    # CleaningArea authorization checks), so a top-level import here would be circular - the
+    # same pattern used for media_service<->maintenance_service in Phase 10. Auto-seeding a
+    # default area set closes the onboarding gap docs/DATABASE.md §10 flagged: "a new property
+    # has zero cleaning areas until someone configures them." Not a separately authorized
+    # action - this property was just created by an already-authorized caller.
+    from app.services import cleaning_service
+
+    cleaning_service.seed_default_areas_for_property(db, property_)
+
+    return property_
 
 
 def update_property(
