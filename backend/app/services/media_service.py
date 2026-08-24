@@ -2,17 +2,17 @@
 storage abstraction and PROJECT_PLAN.md §8 for the architecture this implements.
 
 SUPPORTED_ENTITY_TYPES is deliberately narrower than scope §20's full list (which also names
-MeterReading, RiskAssessment). Those tables exist in the DB (Phase 2), but their own modules/
-services don't exist yet (Phase 13/14) - and §8's core rule is "file access authorization
-mirrors the parent entity's authorization," which is impossible to enforce for a parent entity
-with no service to ask. Add each one to _VIEW_CHECKS/_MUTATE_CHECKS (and this tuple) as its own
-phase lands, the same incremental pattern Phase 7's read-only Templates API and Phase 8's engine
-already followed. MaintenanceIssue (Phase 10), CleaningInspection (Phase 11), and
-VacantUnitInspection (Phase 12) were added the same way - CleaningInspection/
-VacantUnitInspection's resolvers are plain top-level imports (unlike MaintenanceIssue's
-local-import workaround below), since neither cleaning_service nor vacant_unit_service ever
-needs to import media_service back: there's no real circular dependency to avoid on their side,
-only Maintenance actually has one.
+MeterReading). That table exists in the DB (Phase 2), but its own module/service doesn't exist
+yet (Phase 14) - and §8's core rule is "file access authorization mirrors the parent entity's
+authorization," which is impossible to enforce for a parent entity with no service to ask. Add
+it to _VIEW_CHECKS/_MUTATE_CHECKS (and this tuple) once its own phase lands, the same incremental
+pattern Phase 7's read-only Templates API and Phase 8's engine already followed. MaintenanceIssue
+(Phase 10), CleaningInspection (Phase 11), VacantUnitInspection (Phase 12), and RiskAssessment
+(Phase 13) were added the same way - CleaningInspection/VacantUnitInspection/RiskAssessment's
+resolvers are plain top-level imports (unlike MaintenanceIssue's local-import workaround below),
+since none of cleaning_service/vacant_unit_service/risk_service ever needs to import
+media_service back: there's no real circular dependency to avoid on their side, only Maintenance
+actually has one.
 
 Two authorization levels per entity type, not one:
 - View (list/download): can the user see the PARENT entity at all? Reuses each parent module's
@@ -26,6 +26,12 @@ Two authorization levels per entity type, not one:
   For Inspection/InspectionResponse it reuses inspection_service.ensure_can_edit (assigned
   inspector or Admin/Manager) - attaching a photo to an in-progress inspection is part of doing
   that inspection, the same "one person's active work" reasoning Phase 8 applied to answers.
+  RiskAssessment's mutate check is the SAME as its view check (any company member), matching
+  Property/Unit rather than Maintenance/Cleaning/VacantUnit - risk_service.py's own update
+  endpoint is Admin/Manager-only (a standalone risk register entry may have no parent Inspection
+  to run ensure_can_edit against at all), but attaching photographic evidence of a hazard is not
+  the same permission as fully editing the risk register entry, the identical "upload evidence
+  is broader than edit" reasoning already established for Property/Unit.
 """
 from typing import BinaryIO
 
@@ -45,6 +51,7 @@ from app.services import (
     cleaning_service,
     inspection_service,
     property_service,
+    risk_service,
     unit_service,
     vacant_unit_service,
 )
@@ -58,6 +65,7 @@ SUPPORTED_ENTITY_TYPES = (
     "MaintenanceIssue",
     "CleaningInspection",
     "VacantUnitInspection",
+    "RiskAssessment",
 )
 
 _IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
@@ -137,6 +145,10 @@ def _mutate_vacant_unit_inspection(db: Session, current_user: User, entity_id: i
     inspection_service.ensure_can_edit(current_user, inspection)
 
 
+def _view_risk_assessment(db: Session, current_user: User, entity_id: int) -> None:
+    risk_service.get_risk_assessment(db, current_user, entity_id)
+
+
 _VIEW_CHECKS = {
     "Property": _view_property,
     "Unit": _view_unit,
@@ -145,6 +157,7 @@ _VIEW_CHECKS = {
     "MaintenanceIssue": _view_maintenance_issue,
     "CleaningInspection": _view_cleaning_inspection,
     "VacantUnitInspection": _view_vacant_unit_inspection,
+    "RiskAssessment": _view_risk_assessment,
 }
 
 _MUTATE_CHECKS = {
@@ -155,6 +168,9 @@ _MUTATE_CHECKS = {
     "MaintenanceIssue": _mutate_maintenance_issue,
     "CleaningInspection": _mutate_cleaning_inspection,
     "VacantUnitInspection": _mutate_vacant_unit_inspection,
+    # Deliberately the SAME function as the view check, not a new one - see the module
+    # docstring's "RiskAssessment's mutate check" paragraph.
+    "RiskAssessment": _view_risk_assessment,
 }
 
 

@@ -13,6 +13,7 @@ from app.api import (
     maintenance,
     media,
     properties,
+    risk,
     units,
     vacant_units,
 )
@@ -57,3 +58,4 @@ app.include_router(media.router, prefix="/api")
 app.include_router(maintenance.router, prefix="/api")
 app.include_router(cleaning.router, prefix="/api")
 app.include_router(vacant_units.router, prefix="/api")
+app.include_router(risk.router, prefix="/api")

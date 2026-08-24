@@ -110,3 +110,9 @@ class CleaningInspectionStatus(str, Enum):
     PENDING = "Pending"
     ASSIGNED = "Assigned"
     COMPLETED = "Completed"
+
+
+class RiskAssessmentStatus(str, Enum):
+    OPEN = "Open"
+    ACTION_PLANNED = "ActionPlanned"
+    CLOSED = "Closed"

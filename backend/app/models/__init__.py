@@ -26,6 +26,8 @@ from app.models.maintenance_issue import MaintenanceIssue
 from app.models.maintenance_update import MaintenanceUpdate
 from app.models.media_file import MediaFile
 from app.models.property import Property
+from app.models.risk_assessment import RiskAssessment
+from app.models.risk_matrix_level import RiskMatrixLevel
 from app.models.role import Role
 from app.models.unit import Unit
 from app.models.user import User, user_roles
@@ -45,6 +47,8 @@ __all__ = [
     "MaintenanceUpdate",
     "MediaFile",
     "Property",
+    "RiskAssessment",
+    "RiskMatrixLevel",
     "Role",
     "Unit",
     "User",

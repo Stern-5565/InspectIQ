@@ -140,10 +140,11 @@ def test_upload_for_property_in_another_company_returns_404(
 def test_upload_with_unsupported_entity_type_returns_422(
     client: TestClient, northgate_inspector, northgate_property_id: int
 ) -> None:
-    # RiskAssessment's own service doesn't exist yet (Phase 13) - still a genuinely unsupported
-    # EntityType. MaintenanceIssue stopped being a valid example of this the moment Phase 10
-    # added it to media_service.SUPPORTED_ENTITY_TYPES.
-    response = _upload(client, auth_headers(client, northgate_inspector.Email), "RiskAssessment", 1)
+    # MeterReading's own service doesn't exist yet (Phase 14) - still a genuinely unsupported
+    # EntityType, the only one left. MaintenanceIssue/CleaningInspection/VacantUnitInspection/
+    # RiskAssessment each stopped being valid examples of this the moment their own phase added
+    # them to media_service.SUPPORTED_ENTITY_TYPES (Phases 10-13).
+    response = _upload(client, auth_headers(client, northgate_inspector.Email), "MeterReading", 1)
     assert response.status_code == 422
 
 

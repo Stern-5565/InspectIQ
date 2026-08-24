@@ -712,3 +712,109 @@ updated via `PATCH` → everything (the inspection and its 102 snapshot response
 record, the media row and file) cleaned up afterward, including manually restoring the demo
 unit's `OccupancyStatus` back to `Occupied` so the shared seed data wasn't left mutated for the
 next session.
+
+## 2026-08-24 — Phase 13 (Risk Assessments) built, first real SQL Server computed column in the ORM
+
+Built the risk module per scope §19. `RiskAssessments`/`RiskMatrixLevels` were already real
+tables since Phase 2 (`database/tables/06_RiskTables.sql`), so like every phase since 9, this is
+entirely application code - no new SQL. This phase was different in one specific way though:
+it's the first time the ORM had to actually MAP a real DB-computed column, not just describe
+plain data.
+
+**`RiskAssessments.RiskScore` is mapped with SQLAlchemy's `Computed("Likelihood * Severity",
+persisted=True)`, not a plain `mapped_column(Integer)` - and this was verified with a real
+insert before anything else got built on top of it, not assumed to work from reading
+SQLAlchemy's docs.** `Computed` tells the ORM to exclude the column from generated INSERT/UPDATE
+statements automatically (SQL Server would reject an explicit value anyway - the column is
+`AS (Likelihood * Severity) PERSISTED`, computed at the database layer, exactly the "structural
+guarantee, not app convention" pattern `docs/DATABASE.md §9.6` calls for). The existing
+`db.refresh()` call every other repository's `create_*` function already does (to pick up
+server-side defaults like `CreatedAt`) is what actually populates `RiskScore` back onto the
+Python object after insert - no new refresh logic was needed, just the right column mapping. A
+throwaway script inserted a real `Likelihood=4, Severity=5` row directly against
+`InspectIQDb` and confirmed `RiskScore` came back as `20` before `app/services/risk_service.py`
+or any route existed - the same "verify the risky part in isolation before building the rest"
+discipline this project has applied to every genuinely new mechanism since Phase 2's SQL
+gotchas (ANSI_NULLS/QUOTED_IDENTIFIER, filtered index NOT IN, etc.).
+
+**A third distinct authorization shape for this project - two tiers, but NOT the same two tiers
+Cleaning uses, and the reasoning is worth keeping precise because the two modules could
+otherwise look interchangeable at a glance.** View: any company member (unchanged, every module
+so far). Create: Administrator/Manager/Inspector - raising a hazard is scope-equivalent to
+Maintenance's "raise an issue" tier. Update: Administrator/Manager ONLY, covering every field
+(including `Status` and `ResponsiblePersonUserId`) in one combined `PATCH` - no separate
+assign/status endpoints the way MaintenanceIssues has, and critically, NO assigned-inspector
+`ensure_can_edit` carve-out the way Cleaning/VacantUnit have. Two independent reasons converge
+on the same answer here, either sufficient alone: scope §19 describes no audit-trail requirement
+(unlike §18's explicit "Maintenance History" - nothing analogous exists for risk, so there's no
+timeline table motivating split endpoints), AND, structurally, `RiskAssessment.InspectionId` is
+NULLABLE - a standalone Property-level risk-register entry legitimately has no parent
+`Inspection` at all, so `ensure_can_edit`'s whole mechanism (look up the Inspection, check its
+assigned inspector) has nothing to run against for that case. Cleaning/VacantUnit could adopt the
+Inspection-anchored shape uniformly because their own `InspectionId` is NOT NULL by schema
+design - RiskAssessment structurally cannot make the same choice even if it wanted to. Worth
+remembering as the concrete counterexample the next time a module superficially resembles an
+earlier one: check the actual nullability of the parent-linking FK before assuming the same
+authorization mechanism transfers.
+
+**`RiskMatrixLevels` needed real "global default + per-company override" lookup semantics
+worked out from scratch, not copied from `InspectionTemplates` despite using the identical
+nullable-`CompanyId` mechanism.** `InspectionTemplates`' version is additive: `CompanyId IS NULL
+OR CompanyId = @company_id` returns the global templates AND a company's own together, because a
+template *list* is naturally a menu of independent options - more choices is strictly fine. A
+risk matrix is different in kind: it must be a coherent whole covering the full score range with
+no gaps or overlaps, so mixing two leftover global bands with two new company-specific ones
+could easily produce nonsense (a score of 7 matching neither a global "Medium 5-9" band nor a
+narrower custom one, or matching two bands at once). The correct semantics, once actually
+reasoned through rather than pattern-matched from the nearest precedent: a company's own bands
+FULLY REPLACE the global default the instant any exist at all (`risk_repository.
+get_risk_matrix_for_company` - query the company's own rows first, only fall back to the global
+`CompanyId IS NULL` rows if that came back empty). Confirmed with a real test that creates one
+company-specific band spanning the whole 1-25 range, verifies a subsequent risk assessment for
+that company resolves against it (not the global bands), AND verifies a *different* company's
+matrix is completely unaffected - proving the override is scoped correctly, not just present.
+
+**`RiskAssessment`'s media authorization deliberately reuses the SAME function for both view and
+mutate - the Property/Unit shape, not the Maintenance/Cleaning/VacantUnit shape** - "any company
+member" governs both, even though `risk_service.py`'s own `PATCH` endpoint is Admin/Manager-only.
+This is the same "uploading evidence is not the same permission as editing the record" principle
+already established for Property/Unit back in Phase 9, applied here for the first time since
+then to a module whose own edit bar is narrower than its view bar (Property/Unit's edit bar was
+already Admin/Manager-only too, so this wasn't previously a visible distinction from a module
+where the parent's mutate check WAS just as broad as view). Confirmed live and in a dedicated
+test: the same Inspector who got a genuine 403 trying to `PATCH` a risk assessment successfully
+uploaded photographic evidence to that exact record moments later - not a coincidence of two
+unrelated permission checks, but the deliberately-designed outcome of the module docstring's own
+reasoning.
+
+**`create_risk_assessment` accepts an optional `MaintenanceIssueId` link (the FK exists per
+`docs/DATABASE.md`'s ERD, `RiskAssessment N──0/1 ... MaintenanceIssue`) but does NOT let it
+independently derive `PropertyId` the way `InspectionId`/`InspectionResponseId` do** - scope
+§19's own create-form field list only names Property and Inspection, not MaintenanceIssue, so
+the FK is honored (isolation-checked via `maintenance_service.get_issue` if supplied) without
+inventing a third priority-ordered derivation path scope never actually asked for. A deliberate,
+proportionate stopping point, not an oversight.
+
+16 new tests (108 total), all against the real DB: standalone create with `RiskScore`/
+`RiskLevel` checked against two different real score bands (20→Critical, 6→Medium - not just one
+example, to prove the matrix lookup itself, not a single lucky number), role-gated create
+(Maintenance blocked, Inspector allowed - the create tier, not the narrower update tier),
+missing-Property-and-Inspection 422, cross-company 404 on create AND on get, create-from-response
+correctly deriving Property/Inspection, an Admin update that changes `Severity` and confirms
+`RiskLevel` is genuinely RE-derived rather than left stale from create time, an Inspector getting
+403 on update EVEN FOR A RECORD THEY THEMSELVES JUST CREATED (the clearest possible proof this
+tier is role-based, not ownership-based - a subtlety worth testing explicitly rather than
+assuming from the route gate alone), the global default matrix, the override-replaces-global
+behavior (checked two ways: the resolved level on a new assessment, and a second company's
+matrix staying untouched), `MinScore > MaxScore` rejected 422, and the Property/Unit-shaped media
+test described above.
+
+**Verified live**: real Inspector login created a risk assessment (`Likelihood=4, Severity=4` →
+confirmed `RiskScore=16`, `RiskLevel="High"`, matching the global matrix's own bands exactly) →
+the same Inspector got a real 403 attempting `PATCH` → a real Administrator update changed
+`Severity` and confirmed `RiskLevel` recomputed to `"Low"` (not left at the create-time value) →
+a Bright Spaces admin got 404 on the record → the Inspector who couldn't edit the record
+successfully uploaded evidence to it → all test data (the assessment, the media row, and its
+file on disk) cleaned up afterward, with a direct DB check confirming zero leftover
+company-specific `RiskMatrixLevels` rows - the override test's own cleanup genuinely restored
+global-default behavior for every company, not just asserted that it did.

@@ -12,6 +12,7 @@ ENTITY_TYPES = (
     "MaintenanceIssue",
     "CleaningInspection",
     "VacantUnitInspection",
+    "RiskAssessment",
 )
 
 

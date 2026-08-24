@@ -224,9 +224,9 @@ Current status. Overwrite/update this file at the end of every session or phase 
     module-public for this reuse). Caption-edit/delete are narrower still: uploader or
     Admin/Manager only. `SUPPORTED_ENTITY_TYPES` originally excluded MeterReading/
     MaintenanceIssue/RiskAssessment/CleaningInspection, whose own services didn't exist yet;
-    MaintenanceIssue (Phase 10), CleaningInspection (Phase 11), and VacantUnitInspection
-    (Phase 12, see below) have since been added — MeterReading/RiskAssessment are still
-    deferred to Phases 13/14.
+    MaintenanceIssue (Phase 10), CleaningInspection (Phase 11), VacantUnitInspection (Phase 12),
+    and RiskAssessment (Phase 13, see below) have since been added — MeterReading is the one
+    remaining type still deferred, to Phase 14.
   - `app/repositories/inspection_response_repository.py` gained
     `get_response_by_id_for_company` — the one function there that takes `company_id` directly
     (documented as a deliberate exception to the file's own "no company_id param" rule), needed
@@ -422,6 +422,69 @@ Current status. Overwrite/update this file at the end of every session or phase 
     (inspection, its 102 snapshot responses, the vacant-unit record, the media row and file)
     cleaned up afterward, including manually restoring the demo unit's `OccupancyStatus` back
     to `Occupied`.
+- **Phase 13 (Risk Assessments) complete**, per scope §19. No new SQL —
+  `RiskAssessments`/`RiskMatrixLevels` have existed since Phase 2.
+  - `app/models/risk_assessment.py`, `risk_matrix_level.py` — added to `models/__init__.py` and
+    sanity-queried before any route was written, including a real **insert-then-refresh test**
+    to confirm the `Computed` mapping for `RiskScore` actually works end-to-end (not just
+    imports cleanly) before building anything on top of it — `RiskScore` is the project's first
+    real SQL Server `PERSISTED` computed column touched by the ORM; `Computed("Likelihood *
+    Severity", persisted=True)` tells SQLAlchemy to exclude it from generated INSERT/UPDATE
+    statements automatically, and the repository's existing `db.refresh()` after insert
+    populates it back from the server. Confirmed with a real `Likelihood=4, Severity=5` insert
+    that came back `RiskScore=20` before any route existed.
+  - **A third distinct authorization shape — two tiers, but not the same two as Cleaning's**,
+    re-derived independently rather than copied: view (any company member) · create
+    (Administrator/Manager/Inspector — raising a hazard is the same tier Maintenance's create
+    uses) · update (Administrator/Manager only, covering EVERY field including `Status`/
+    `ResponsiblePersonUserId` in ONE combined `PATCH`, no separate assign/status endpoints and
+    no assigned-inspector carve-out). The reasoning for the update tier, either half sufficient
+    on its own: scope §19 names no audit-trail requirement the way §18 explicitly names
+    "Maintenance History," and — structurally — `RiskAssessment.InspectionId` is NULLABLE, so a
+    standalone Property-level risk register entry may have no parent `Inspection` at all to run
+    `ensure_can_edit` against. See `app/services/risk_service.py`'s module docstring.
+  - `create_risk_assessment` follows the exact `MaintenanceIssueCreate`/`CleaningInspectionCreate`
+    linkage convention: a manual `PropertyId`, or `InspectionId`/`InspectionResponseId` that
+    derives `PropertyId` server-side (never trusted from the client alongside one); an optional
+    `MaintenanceIssueId` link is isolation-checked via `maintenance_service.get_issue` but does
+    NOT independently derive `PropertyId` (scope's own create-form field list only names
+    Property/Inspection, not MaintenanceIssue — the FK exists per `docs/DATABASE.md`'s ERD for
+    linking, not as its own creation path).
+  - **`RiskMatrixLevels` gets its own small CRUD surface** — not optional polish, scope §19
+    says outright "the exact risk matrix should remain configurable." View: any company member
+    (rates/colors aren't sensitive). Create/update: Administrator/Manager only, matching
+    `CleaningAreas`' exact per-company-configuration shape. **A company's own bands fully
+    REPLACE the global default the moment any exist** — a real, deliberate override, NOT the
+    additive "global + company" list `InspectionTemplates` uses, because mixing leftover global
+    bands with a company's own could leave score gaps or overlaps a coherent matrix must never
+    have (`app/repositories/risk_repository.py`'s `get_risk_matrix_for_company`). No delete
+    endpoint — a matrix's bands must stay contiguous, and scope doesn't ask for that lifecycle
+    management.
+  - `RiskAssessment`'s media mutate check is the SAME function as its view check (any company
+    member) — matching Property/Unit's "upload evidence is broader than edit" shape, NOT
+    Maintenance/Cleaning/VacantUnit's narrower `ensure_can_edit`-based one. Confirmed live: an
+    Inspector who got a genuine 403 trying to `PATCH` a risk assessment successfully uploaded a
+    photo to the same record moments later.
+  - `app/api/risk.py` — `GET/POST /api/risk-matrix-levels`, `PATCH /api/risk-matrix-levels/{id}`,
+    `POST/GET /api/risk-assessments`, `GET /api/risk-assessments/{id}`,
+    `PATCH /api/risk-assessments/{id}`.
+  - 16 new tests (108 total), all against the real DB: standalone create with `RiskScore`/
+    `RiskLevel` verified against two different score bands (20→Critical, 6→Medium), role-gated
+    create (Maintenance blocked, Inspector allowed), missing-Property-and-Inspection 422,
+    cross-company 404 on create, create-from-response deriving Property/Inspection correctly,
+    cross-company get 404, an Admin update that changes `Severity` and confirms `RiskLevel` is
+    RE-derived (not left stale), an Inspector getting 403 on update EVEN FOR THEIR OWN just-created
+    record (proving the tier really is role-based, not ownership-based), the global default
+    matrix, a company override fully replacing the global default (verified both on a
+    subsequent risk assessment's resolved level AND that a *different* company's matrix is
+    unaffected), `MinScore > MaxScore` rejected 422, and photo upload by an Inspector who
+    cannot edit the record.
+  - **Verified live**: real Inspector login created a risk assessment (`Likelihood=4,
+    Severity=4` → confirmed `RiskScore=16`, `RiskLevel="High"`) → the same Inspector got a real
+    403 trying to `PATCH` it → a real Admin update changed `Severity` and confirmed `RiskLevel`
+    recomputed to `"Low"` → a Bright Spaces admin got 404 on the record → the Inspector
+    successfully uploaded evidence to the same record they couldn't edit → all test data (the
+    assessment, media row, and file) cleaned up afterward.
 
 ## Currently being worked on
 
@@ -495,10 +558,22 @@ dependencies pinned with `>=` floors in `requirements.txt` — see `backend/READ
 must be explicitly closed — Starlette does not close it for you**, confirmed by a real Windows
 `PermissionError` when Phase 9's first `/download` implementation leaked a handle; see
 `app/api/media.py`'s `_iter_and_close`. When adding a new polymorphic-media entity type
-(RiskAssessment/CleaningInspection/MeterReading remaining), add it to both `media_service.py`'s
-`_VIEW_CHECKS` and `_MUTATE_CHECKS` dicts and to `app/schemas/media_file.py`'s `ENTITY_TYPES`
-tuple — not just one of the three (MaintenanceIssue in Phase 10 is the reference example;
-CleaningInspection/VacantUnitInspection in Phases 11/12 followed the same checklist).
+(only MeterReading remains, Phase 14), add it to both `media_service.py`'s `_VIEW_CHECKS` and
+`_MUTATE_CHECKS` dicts and to `app/schemas/media_file.py`'s `ENTITY_TYPES` tuple — not just one
+of the three (MaintenanceIssue in Phase 10 is the reference example; CleaningInspection/
+VacantUnitInspection/RiskAssessment in Phases 11-13 each followed the same checklist, and
+`test_media.py`'s "unsupported EntityType" test has had to be updated to point at whichever type
+is still genuinely unsupported every single phase since Phase 9 — check that test too, not just
+the two dicts and the tuple).
+**A "global default + per-company override" nullable-CompanyId pattern needs its exact lookup
+semantics re-derived per table, not copied verbatim from `InspectionTemplates`** — confirmed by
+`RiskMatrixLevels` in Phase 13 needing the OPPOSITE semantics from `InspectionTemplates`: a
+template list is additive (global options plus a company's own, shown together), but a risk
+matrix must be a coherent whole covering every score with no gaps, so a company's own bands need
+to fully REPLACE the global default the instant any exist, not sit alongside a stale leftover
+global band. Same nullable-`CompanyId` mechanism, different resolution logic
+(`risk_repository.get_risk_matrix_for_company`) - check which behavior a new "global + override"
+table actually needs before assuming it matches the first precedent.
 **When two services each need to call the other, use a function-local import on (at least) one
 side rather than restructuring the module boundary** — confirmed working, not just theoretical,
 by `media_service`↔`maintenance_service` in Phase 10 (see either file for the exact pattern and
@@ -519,24 +594,30 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Vacant Unit Inspection) to git.
-2. Phase 13 — Risk Assessments (`prompts/backend_prompt.md`, Prompt 14; scope §19):
-   `RiskAssessments`/`RiskMatrixLevels` models (tables already exist, Phase 2). The one
-   structural guarantee already built into the schema: `RiskAssessments.RiskScore` is a real SQL
-   Server `PERSISTED` computed column (`Likelihood * Severity`), so a client-supplied score is
-   already structurally impossible — no app-layer validation can or should try to "protect"
-   that column, only read it back after insert. `RiskLevel` is a write-time snapshot from
-   `RiskMatrixLevels` (same historical-accuracy principle as `InspectionResponses`' snapshot
-   columns, §13.1), not a live join - thresholds can change later without reclassifying old
-   assessments. `RiskMatrixLevels` follows the same "global default + per-company override"
-   isolation pattern as `InspectionTemplates` (`CompanyId IS NULL OR CompanyId = @company_id`).
-   `RiskAssessments` can originate from `Property`/`Inspection`/`InspectionResponse`/
-   `MaintenanceIssue` (all nullable FKs, docs/DATABASE.md's ERD) - re-derive the authorization
-   shape from what this module actually represents rather than assuming it matches Phase 10, 11,
-   or 12 by default, the same standing practice every phase since Phase 10 has followed. Add
-   `EntityType="RiskAssessment"` to `media_service.py` once this phase's service exists (scope
-   §19 lists "Pictures" as a field) - check both import directions independently before deciding
-   whether a local-import workaround is actually needed here, per the note above.
+1. Commit this batch (Risk Assessments) to git.
+2. Phase 14 — AI/OCR Meter Reading (`prompts/backend_prompt.md`, Prompt 10; scope §11):
+   `MeterReadings` model (table already exists, Phase 2 — `MeterReadingId PK,
+   InspectionResponseId FK NULLABLE, PropertyId FK denormalized for "latest reading" queries
+   without joining through Inspection, MeterType CHECK enum Electricity/Gas/Water
+   future-proofed, MeterSerialNumber, PhotoMediaFileId FK MediaFiles, AIDetectedReading DECIMAL
+   NULLABLE, AIConfidence DECIMAL NULLABLE, ConfirmedReading DECIMAL NULLABLE, ReadingDateTime,
+   InspectorNotes`). `AIDetectedReading`/`ConfirmedReading` are deliberately separate columns
+   (scope §11: never let the AI value silently become the confirmed one) - the last module
+   still using this project's real-computed-column-and-snapshot family of patterns before
+   moving into genuinely new territory: an actual external OCR call. Scope explicitly asks for
+   "mock provider first" (Prompt 10's own phrasing per the phase table) - build an
+   `IMeterReadingOcrService`-style abstraction (mirroring `IMediaStorageService`'s
+   local-now/swappable-later shape from Phase 9) with a mock implementation that returns a
+   plausible fake reading + confidence, not a real OCR API integration yet. `PhotoMediaFileId`
+   means this phase depends on Phase 9's media upload already existing (it does) - the meter
+   photo IS a `MediaFile`, uploaded via the existing generic `/api/media` endpoint with
+   `EntityType="MeterReading"`, not a bespoke upload path. This is also the LAST entity type
+   `media_service.SUPPORTED_ENTITY_TYPES` needs (`docs/DATABASE.md`'s scope §20 list is then
+   fully covered) - check both import directions independently before deciding whether a
+   local-import workaround is needed, per the note above. Once MeterReading is added,
+   `test_media.py`'s "unsupported EntityType" test has no real remaining example left to use -
+   switch it to an obviously-fake string (e.g. `"NotARealEntityType"`) rather than reaching for
+   another real-but-not-yet-built table name, since none will be left.
 
 ## Files that require attention
 
