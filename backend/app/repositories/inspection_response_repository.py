@@ -1,17 +1,26 @@
 """DB access only - no business rules.
 
-No company_id parameter on any function here - by design. Every response lookup happens
+No company_id parameter on most functions here - by design. Every response lookup happens
 scoped to an already-authorized InspectionId (the service layer resolves and isolation-checks
 the parent Inspection first, via inspection_repository.get_inspection_by_id, before ever
 touching a response) - see app/services/inspection_service.py. Filtering by InspectionId here
 is what actually prevents a response_id from a different inspection (or company) matching,
 since InspectionResponse has no CompanyId of its own to filter on directly.
+
+get_response_by_id_for_company is the one deliberate exception, added for Phase 9's media
+attachment (app/services/media_service.py): a client attaching/viewing a photo on an
+InspectionResponse only has the response_id, not its parent InspectionId, so there's no
+already-authorized Inspection to scope through yet - this function has to join out to
+Inspections/Properties itself to establish company isolation before the caller can look up and
+isolation-check the parent Inspection the normal way.
 """
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.inspection import Inspection
 from app.models.inspection_question import InspectionQuestion
 from app.models.inspection_response import InspectionResponse
+from app.models.property import Property
 
 
 def create_responses_bulk(db: Session, responses: list[InspectionResponse]) -> None:
@@ -25,6 +34,18 @@ def get_response_within_inspection(
     stmt = select(InspectionResponse).where(
         InspectionResponse.InspectionId == inspection_id,
         InspectionResponse.InspectionResponseId == response_id,
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def get_response_by_id_for_company(
+    db: Session, company_id: int, response_id: int
+) -> InspectionResponse | None:
+    stmt = (
+        select(InspectionResponse)
+        .join(Inspection, Inspection.InspectionId == InspectionResponse.InspectionId)
+        .join(Property, Property.PropertyId == Inspection.PropertyId)
+        .where(Property.CompanyId == company_id, InspectionResponse.InspectionResponseId == response_id)
     )
     return db.execute(stmt).scalar_one_or_none()
 

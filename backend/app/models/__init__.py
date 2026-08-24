@@ -20,6 +20,7 @@ from app.models.inspection_question import InspectionQuestion
 from app.models.inspection_response import InspectionResponse
 from app.models.inspection_section import InspectionSection
 from app.models.inspection_template import InspectionTemplate
+from app.models.media_file import MediaFile
 from app.models.property import Property
 from app.models.role import Role
 from app.models.unit import Unit
@@ -33,6 +34,7 @@ __all__ = [
     "InspectionResponse",
     "InspectionSection",
     "InspectionTemplate",
+    "MediaFile",
     "Property",
     "Role",
     "Unit",

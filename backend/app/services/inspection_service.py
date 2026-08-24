@@ -28,14 +28,17 @@ def calculate_completion_percentage(responses: list[InspectionResponse]) -> floa
     return round(answered / len(responses) * 100, 1)
 
 
-def _ensure_can_edit(current_user: User, inspection: Inspection) -> None:
+def ensure_can_edit(current_user: User, inspection: Inspection) -> None:
     """Response edits and submission are restricted to the inspection's own assigned
     inspector, or an Administrator/Manager - deliberately narrower than Properties/Templates'
     "any company member can view, Admin/Manager can mutate" pattern. Unlike a property, an
     in-progress inspection is one specific person's active work; another Inspector at the same
     company shouldn't be able to silently alter it just by sharing the Inspector role. Viewing
     (GET) has no such restriction - any authenticated company member can see any inspection,
-    same as everything else in this project so far."""
+    same as everything else in this project so far.
+
+    Public (not module-private) because app/services/media_service.py reuses it for the same
+    "who can attach evidence to this inspection" question - Phase 9."""
     is_assigned_inspector = current_user.UserId == inspection.InspectorUserId
     user_role_names = {role.RoleName for role in current_user.roles}
     is_manager_or_admin = bool(user_role_names.intersection(_MANAGE_ROLES))
@@ -140,7 +143,7 @@ def update_response(
     db: Session, current_user: User, inspection_id: int, response_id: int, payload: InspectionResponseUpdate
 ) -> InspectionResponse:
     inspection = get_inspection(db, current_user, inspection_id)
-    _ensure_can_edit(current_user, inspection)
+    ensure_can_edit(current_user, inspection)
 
     if inspection.Status == "Submitted":
         # Reports must represent the inspection exactly as it existed when submitted (scope
@@ -162,7 +165,7 @@ def update_response(
 
 def submit_inspection(db: Session, current_user: User, inspection_id: int) -> Inspection:
     inspection = get_inspection(db, current_user, inspection_id)
-    _ensure_can_edit(current_user, inspection)
+    ensure_can_edit(current_user, inspection)
 
     if inspection.Status == "Submitted":
         raise ConflictError("Inspection has already been submitted.")

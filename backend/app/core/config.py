@@ -38,6 +38,13 @@ class Settings(BaseSettings):
 
     CORS_ALLOWED_ORIGINS: str = "http://localhost:5173"
 
+    # Phase 9 (Media). Local filesystem now (PROJECT_PLAN.md §8) - relative to backend/ unless
+    # an absolute path is given. Gitignored (backend/uploads/ in .gitignore already, added
+    # proactively back in Phase 1).
+    MEDIA_UPLOAD_DIR: str = "uploads"
+    MEDIA_MAX_IMAGE_SIZE_BYTES: int = 15 * 1024 * 1024
+    MEDIA_MAX_VIDEO_SIZE_BYTES: int = 250 * 1024 * 1024
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         if self.APP_ENV != "development" and (

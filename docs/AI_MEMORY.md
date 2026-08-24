@@ -339,3 +339,93 @@ one Administrator at Bright Spaces Estates (`admin@brightspaces.example`), all p
 got back real, working tokens. This closes the gap flagged since the Phase 2 seed-data work
 ("`Users` deliberately NOT seeded... a fake placeholder hash would be worse than no demo users
 at all") - now that Phase 5 exists, the hashes are real.
+
+## 2026-08-24 — Phase 9 (Photo & Video Uploads) built, real Windows file-lock bug caught live
+
+Built the `IMediaStorageService` abstraction and a generic, polymorphic `/api/media` router,
+per scope §20 and `PROJECT_PLAN.md §8`. `MediaFiles` was already a real table since Phase 2
+(`database/tables/07_MediaAndNotesTables.sql`), so this phase is entirely application code: no
+new SQL.
+
+**One refinement to the §8 sketch, made necessary by actually implementing it**: the original
+`IMediaStorageService` had `save`/`get_url`/`delete` only. `get_url` implicitly assumed a
+browser-redirectable URL, which only exists once real blob storage is added (Phase 20) - local
+dev has no static file server exposing `backend/uploads/` (deliberately: that would bypass the
+"authorization mirrors the parent entity" rule entirely, letting anyone with a guessed/leaked
+URL bypass the permission check). Added `open_stream(storage_key) -> BinaryIO` to the Protocol
+so the download endpoint reads bytes back through the already-authenticated API instead;
+`get_url` stays on the interface for the future blob implementation and returns `None` for
+`LocalFileStorageService`. `app/services/media_storage.py`'s docstring explains this in full -
+worth reading before adding the production blob implementation in Phase 20, so its `get_url`
+return value doesn't get treated as sufficient authorization on its own (it isn't - a signed URL
+is only handed out AFTER our own permission check passes, same principle, different mechanism).
+
+**`SUPPORTED_ENTITY_TYPES` is `("Property", "Unit", "Inspection", "InspectionResponse")` -
+narrower than scope §20's full list**, which also names MeterReading, MaintenanceIssue,
+RiskAssessment, CleaningInspection. Those tables exist (Phase 2), but their own services don't
+(Phases 10/11/13/14), and §8's core rule - "file access authorization mirrors the parent
+entity's authorization" - is impossible to enforce for a parent with no service to ask. Same
+incremental-scoping pattern as Phase 7's read-only Templates API. Add each one to
+`app/services/media_service.py`'s `_VIEW_CHECKS`/`_MUTATE_CHECKS` dicts as its own phase lands.
+
+**Two authorization levels per entity type, not one - a real design decision, not boilerplate.**
+View (list/download) reuses each parent module's own "get" (already "any company member" for
+every supported type today). Mutate (upload; delete/caption-edit use a related but distinct
+uploader-or-Admin/Manager check) is where it gets interesting: for Property/Unit, mutate is the
+SAME as view - deliberately NOT the narrower Administrator/Manager-only bar those modules use
+for editing the property/unit record itself, because scope's Inspector role description
+explicitly lists "upload evidence" as its own standing capability, separate from editing a
+property. For Inspection/InspectionResponse, mutate reuses `inspection_service.ensure_can_edit`
+(renamed from `_ensure_can_edit` - made module-public specifically for this reuse), the same
+assigned-inspector-or-Admin/Manager rule Phase 8 established: attaching a photo to an
+in-progress inspection is part of doing that inspection, not shared company data.
+
+**`InspectionResponse` media needed a new repository function that breaks the module's own
+stated rule, deliberately and documented as such.**
+`inspection_response_repository.py`'s header says "no company_id parameter on any function
+here - by design," because every existing caller already has an authorized `InspectionId` in
+hand before touching a response. Media upload only has the bare `response_id` from the client
+(via the generic `EntityType`/`EntityId` pair), with no `InspectionId` yet - so
+`get_response_by_id_for_company` joins out to `Inspections`/`Properties` itself to establish
+isolation first, then the caller resolves and edit-checks the parent `Inspection` the normal
+way. Documented in the file's own header as the one deliberate exception, not an oversight.
+
+**A real bug found only by testing with an actual running server on Windows, not by pytest -
+the same category of lesson as Phase 5's, different mechanism.** The first `StreamingResponse`
+implementation for `/api/media/{id}/download` passed the raw file object returned by
+`open_stream()` straight through as the response content. Starlette's `StreamingResponse`
+iterates its content but never closes a plain file object - the handle leaked on every
+download. `pytest` alone didn't obviously fail on this the way Phase 5's bug did; it surfaced as
+a genuine `PermissionError: [WinError 32] The process cannot access the file` the moment a test
+tried to delete the same file right after downloading it - Windows won't let you delete (or
+sometimes even re-read) a file with an open handle, unlike POSIX. Fixed with a small
+`_iter_and_close` generator in `app/api/media.py` that reads in 64KB chunks and closes the
+stream in a `finally` block. Confirmed fixed by re-running the exact test that caught it, AND
+by a live curl session: upload → download (byte-for-byte match) → list → cross-company 404 →
+delete → confirm gone, then checking `backend/uploads/` afterward for orphaned files (none).
+**Standing lesson for this project**: this is the second time a real running server (not pytest)
+caught a bug pytest's own assertions didn't directly surface - keep testing against a live
+server for every phase, not just when TestClient's in-process fake happens to miss something.
+
+**Upload validation order is deliberate**: the mutate-permission check runs BEFORE the file is
+ever written to disk (fail fast on authorization, no wasted I/O for a request that was going to
+be rejected anyway), but content-size validation happens AFTER the file is saved (since
+`UploadFile` doesn't expose a reliable size before reading it) - an oversized file is deleted
+immediately if it exceeds `MEDIA_MAX_IMAGE_SIZE_BYTES`/`MEDIA_MAX_VIDEO_SIZE_BYTES`, never left
+orphaned on disk. Content-type is checked against a fixed allowlist (`_ALLOWED_CONTENT_TYPES` in
+`media_service.py`) before any disk I/O at all.
+
+**Caption edits and deletes are gated narrower than upload/view**: uploader, or
+Administrator/Manager - not "any company member who can view the parent entity." Someone else's
+uploaded evidence shouldn't be silently editable or removable just by shared company membership,
+the same reasoning Phase 8 applied to inspection responses (one person's work, not shared data)
+applied here to one person's uploaded file.
+
+8 new tests (59 total), all against the real DB with throwaway users/media rows/files cleaned up
+per-test (including actually deleting the file written to `backend/uploads/`, not just the DB
+row): upload+download+list round-trip with byte-for-byte content verification, cross-company
+404 on upload, unsupported `EntityType` and unsupported content-type both 422, delete-by-uploader
+removes both the row and the file (checked with `Path.exists()`, not just asserted), delete by a
+non-uploader non-admin 403, upload to an `Inspection` by an unassigned Inspector 403 (reusing
+`ensure_can_edit`, proving the reuse actually works end-to-end and not just at the import level),
+caption update by the uploader.

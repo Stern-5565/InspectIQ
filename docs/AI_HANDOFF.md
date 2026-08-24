@@ -203,6 +203,53 @@ Current status. Overwrite/update this file at the end of every session or phase 
     to exactly 1.0% → attempted submit and got back the correct "12 mandatory questions remain"
     message (13 total mandatory minus the one just answered) — all over actual HTTP against the
     real seeded data, then cleaned up.
+- **Phase 9 (Photo & Video Uploads) complete**, per scope §20 / `PROJECT_PLAN.md §8`. No new
+  SQL — `MediaFiles` has existed since Phase 2.
+  - `app/services/media_storage.py` — `IMediaStorageService` Protocol (`save`/`open_stream`/
+    `get_url`/`delete`) + `LocalFileStorageService` (dev; files under `backend/uploads/`,
+    gitignored). `open_stream` is an addition to the original §8 sketch — see the module
+    docstring for why local dev needs it (no static file server, since that would bypass the
+    per-request permission check) and how the production blob implementation should use
+    `get_url` instead (Phase 20).
+  - `app/models/media_file.py`, `app/schemas/media_file.py`, `app/repositories/
+    media_file_repository.py` — the usual layering; `MediaFiles` has its own denormalized
+    `CompanyId` (docs/DATABASE.md §7), so get/list filter on it directly rather than joining
+    through a parent entity.
+  - `app/services/media_service.py` — the actual authorization logic. Two levels per entity
+    type: **view** (list/download) reuses each parent module's own "get" (any company member);
+    **mutate** (upload) is the SAME as view for Property/Unit (scope gives Inspector "upload
+    evidence" as its own capability, separate from editing the property/unit record), but for
+    Inspection/InspectionResponse reuses `inspection_service.ensure_can_edit` — the Phase 8
+    assigned-inspector-or-Admin/Manager rule (renamed from `_ensure_can_edit`, made
+    module-public for this reuse). Caption-edit/delete are narrower still: uploader or
+    Admin/Manager only. `SUPPORTED_ENTITY_TYPES = ("Property", "Unit", "Inspection",
+    "InspectionResponse")` — deliberately excludes MeterReading/MaintenanceIssue/
+    RiskAssessment/CleaningInspection, whose own services don't exist yet (Phases 10/11/13/14);
+    add each to `_VIEW_CHECKS`/`_MUTATE_CHECKS` as its phase lands.
+  - `app/repositories/inspection_response_repository.py` gained
+    `get_response_by_id_for_company` — the one function there that takes `company_id` directly
+    (documented as a deliberate exception to the file's own "no company_id param" rule), needed
+    because media's `EntityType`/`EntityId` pair gives only a bare `response_id`, with no
+    already-authorized `InspectionId` in hand yet the way every other caller has.
+  - `app/api/media.py` — generic polymorphic router (`POST/GET /api/media`,
+    `GET /api/media/{id}`, `GET /api/media/{id}/download`, `PATCH /api/media/{id}`,
+    `DELETE /api/media/{id}`), not nested per parent module.
+  - **A real bug found only by testing with an actual running server on Windows**: the first
+    `/download` implementation handed `open_stream()`'s raw file object straight to
+    `StreamingResponse`, which iterates content but never closes it — the handle leaked on
+    every download. Surfaced as a genuine `PermissionError: [WinError 32]` the moment a test
+    tried to delete the same file right after downloading it. Fixed with an `_iter_and_close`
+    generator in `app/api/media.py` that reads in chunks and closes the stream in `finally`.
+    Full story in `docs/AI_MEMORY.md`'s 2026-08-24 entry.
+  - 8 new tests (59 total), all against the real DB with throwaway users/media rows/files
+    cleaned up per-test (files actually deleted from `backend/uploads/`, not just DB rows):
+    upload+download+list round-trip (byte-for-byte content check), cross-company 404 on upload,
+    unsupported EntityType/content-type both 422, delete-by-uploader removes row+file, delete by
+    non-uploader-non-admin 403, upload to an Inspection by an unassigned Inspector 403, caption
+    update by the uploader.
+  - **Verified live**: real Inspector login → real property → upload via curl → download
+    (byte-for-byte match) → list → cross-company 404 (Bright Spaces admin) → delete → confirmed
+    gone (404) → confirmed no orphaned file left in `backend/uploads/`.
 
 ## Currently being worked on
 
@@ -272,16 +319,24 @@ Inspections is narrower ("assigned inspector or Admin/Manager mutates") because 
 inspection is one person's active work, not shared reference data; check what a module actually
 represents before copying the previous module's permission pattern wholesale. Python 3.14,
 dependencies pinned with `>=` floors in `requirements.txt` — see `backend/README.md`.
+**Any file object handed to a `StreamingResponse` (or returned from any storage abstraction)
+must be explicitly closed — Starlette does not close it for you**, confirmed by a real Windows
+`PermissionError` when Phase 9's first `/download` implementation leaked a handle; see
+`app/api/media.py`'s `_iter_and_close`. When adding a new polymorphic-media entity type
+(MaintenanceIssue/RiskAssessment/CleaningInspection/MeterReading), add it to both
+`media_service.py`'s `_VIEW_CHECKS` and `_MUTATE_CHECKS` dicts and to
+`app/schemas/media_file.py`'s `ENTITY_TYPES` tuple — not just one of the three.
 
 ## Next tasks
 
-1. Commit this batch (Inspection Engine) to git.
-2. Phase 9 — Photo & Video Uploads (`prompts/backend_prompt.md`, Prompt 9): the `IMediaStorageService`
-   abstraction (local filesystem now, swappable to blob storage later — `PROJECT_PLAN.md §8`),
-   `MediaFiles` model, upload/retrieve/delete endpoints, content-type/size validation. Once this
-   exists, inspection responses can finally attach real photos (currently `AllowPhoto`/
-   `RequirePhoto` on questions are unenforceable — no mechanism exists yet to check them, and
-   Phase 8 deliberately did not try to fake one).
+1. Commit this batch (Photo & Video Uploads) to git.
+2. Phase 10 — Maintenance Issue System (`prompts/backend_prompt.md`, Prompt 11): `MaintenanceIssues`/
+   `MaintenanceUpdates` models (tables already exist, Phase 2), creating an issue from a failed
+   inspection response (scope §17 — "Failures should allow the inspector to immediately create a
+   Maintenance Issue"), status/history tracking, before/after photos via the Phase 9 media API
+   (`EntityType="MaintenanceIssue"` needs adding to `media_service.py`'s `_VIEW_CHECKS`/
+   `_MUTATE_CHECKS` once this phase's service exists — deliberately deferred until now, see
+   `docs/AI_MEMORY.md`'s 2026-08-24 entry).
 
 ## Files that require attention
 

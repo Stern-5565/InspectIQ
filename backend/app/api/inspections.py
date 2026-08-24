@@ -9,7 +9,7 @@ Role gating: starting/answering/submitting requires Administrator, Manager, or I
 route level (Maintenance/Viewer can't conduct inspections). A second, narrower check happens
 inside the service layer for answering/submitting specifically: only the inspection's own
 assigned inspector, or an Administrator/Manager, can modify it - see
-app/services/inspection_service.py's _ensure_can_edit for why that's stricter than the
+app/services/inspection_service.py's ensure_can_edit for why that's stricter than the
 route-level role check alone. Viewing (list/get) is open to any authenticated company user,
 consistent with every other module so far.
 
