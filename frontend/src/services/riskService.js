@@ -70,3 +70,24 @@ export async function getRiskMatrix() {
   const { data } = await apiClient.get("/risk-matrix-levels");
   return data; // RiskMatrixLevelResponse[]
 }
+
+/** Administrator/Manager only. Creating a level always creates a COMPANY-specific row (never a
+ * global-default one - those are seeded once, company-less, and read-only through this API) -
+ * app/schemas/risk_matrix_level.py's own RiskMatrixLevelCreate docstring. */
+export async function createRiskMatrixLevel({ minScore, maxScore, levelName, sortOrder, colorHint }) {
+  const { data } = await apiClient.post("/risk-matrix-levels", {
+    MinScore: minScore,
+    MaxScore: maxScore,
+    LevelName: levelName,
+    SortOrder: sortOrder ?? 0,
+    ColorHint: colorHint || undefined,
+  });
+  return data; // RiskMatrixLevelResponse
+}
+
+/** Administrator/Manager only. Scoped server-side to THIS company's own rows - a global-default
+ * row's ID 404s here (app/repositories/risk_repository.py's get_risk_matrix_level_by_id). */
+export async function updateRiskMatrixLevel(riskMatrixLevelId, payload) {
+  const { data } = await apiClient.patch(`/risk-matrix-levels/${riskMatrixLevelId}`, payload);
+  return data; // RiskMatrixLevelResponse
+}

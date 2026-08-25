@@ -114,11 +114,16 @@ export function RiskAssessmentsListPage() {
         title="Risk Register"
         description="Risk assessments across your company's properties."
         actions={
-          canCreate && (
-            <Link to="/risk-assessments/new" className="button">
-              + New Risk Assessment
+          <>
+            <Link to="/risk-matrix" className="button button--secondary">
+              Configure Risk Matrix
             </Link>
-          )
+            {canCreate && (
+              <Link to="/risk-assessments/new" className="button">
+                + New Risk Assessment
+              </Link>
+            )}
+          </>
         }
       />
 

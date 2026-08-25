@@ -1263,11 +1263,42 @@ Current status. Overwrite/update this file at the end of every session or phase 
     absent and direct navigation 403'd. Logged in as the Bright Spaces Administrator - both
     sections showed only that company's own data. All test data cleaned up/restored afterward.
     Full detail in `docs/AI_MEMORY.md`'s 2026-08-25 entry.
+- **Phase 16 continued — the Risk Matrix configuration screen complete. This closes out every
+  page named in Prompt 16's own list - Phase 16 is now fully done.** Genuinely ZERO backend
+  changes - `GET`/`POST`/`PATCH /api/risk-matrix-levels` already existed since Phase 13, confirmed
+  by reading `app/api/risk.py`/`risk_service.py`/`risk_repository.py` first. Authorization is
+  `CAN_MANAGE_RISK` (Administrator/Manager), the pre-Admin-Settings tier - confirmed by rereading
+  the service rather than assuming the newest module's Admin-only pattern applied here too.
+  - **The one real design problem, deliberately not solved by the backend**:
+    `risk_repository.get_risk_matrix_for_company`'s own docstring says a company's own bands
+    fully REPLACE the global default the instant any exist - so adding a single custom band would
+    immediately drop every other score from having a resolvable level (a real 422 the next risk
+    assessment would hit). Solved with a "Customize for your company" action that clones the
+    CURRENT effective matrix (the 4 global bands, contiguous 1-25) as company-specific rows in
+    one batch - a complete starting point, never a partial one - plus a live, non-blocking
+    gap/overlap warning (`computeCoverageIssues`) for any later edit that opens a hole.
+  - New CSS (`.banner`/`.banner--info`/`.banner--warning`, `.risk-matrix__swatch`) - the first
+    generic informational/warning callout in `global.css`, and the first place `ColorHint` is
+    actually rendered anywhere in the frontend (every prior module left it unused).
+  - `pages/risk/RiskMatrixPage.jsx` at `/risk-matrix`, linked from a new "Configure Risk Matrix"
+    button on `RiskAssessmentsListPage.jsx`. No role gate on the route itself (view unrestricted,
+    same as Risk Register) - `canManage` computed on the page itself from `CAN_MANAGE_RISK`.
+  - **Verified live as four different users**: as Northgate's Administrator, confirmed the
+    global-default banner + read-only bands, clicked "Customize," confirmed via a direct DB query
+    that exactly 4 real company-specific rows were created (global rows untouched); deliberately
+    edited a band to open a gap (score 4) and confirmed the exact warning text, then fixed it;
+    confirmed `RiskAssessmentsListPage.jsx`'s existing risk-level filter picked up the customized
+    matrix automatically (unchanged code, proving real integration). A Viewer saw no edit
+    controls. The Bright Spaces Administrator was still on their own untouched global default. A
+    Manager (not just Administrator) could edit - confirming `CAN_MANAGE_RISK` really includes
+    Manager. All test data (the 4 company-specific rows) cleaned up afterward. Full detail in
+    `docs/AI_MEMORY.md`'s 2026-08-25 entry.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (the Admin Settings module) to git is the next
-  action.
+- Nothing in progress. Committing this batch (the Risk Matrix configuration screen) to git is
+  the next action. **Phase 16 is fully complete after this commit** - the next session needs to
+  choose what comes after it (see "Next tasks" below).
 
 ## Important decisions
 
@@ -1382,36 +1413,35 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (standalone Admin Settings module) to git.
-2. **The Inspection engine wizard (Prompt 17, all six sub-phases A-F) and Phase 16's Maintenance,
-   Risk Register, Cleaning, Vacant Units, Meter Readings, and Admin Settings standalone modules
-   are all DONE and committed** (see the "What has been completed" section above for each one's
-   own detail, and `docs/AI_MEMORY.md`'s 2026-08-25 entries for the full design/build history).
-3. **Phase 16 itself is still NOT done** - its own exit criteria
-   (`PROJECT_PLAN.md §11`: "All pages navigable, auth-gated correctly") means every module needs
-   its own standalone list/detail pages, the same way Properties got `PropertiesListPage`/
-   `PropertyDetailPage`/`PropertyFormPage`. **Only one page remains from Prompt 16's own list**: a
-   Risk Matrix configuration screen (create/edit `RiskMatrixLevels` - scope §19's "the exact risk
-   matrix should remain configurable," deliberately deferred from the Risk Register pass as a
-   secondary feature, not silently dropped; `GET/POST/PATCH /api/risk-matrix-levels` already
-   exist per Phase 13, so this is very likely another "enrich/build frontend against an existing
-   API" pass like Meter Readings, not a from-scratch one like Admin Settings - confirm by reading
-   `app/api/risk.py`/`risk_service.py` first, don't assume either way).
-   - A pattern worth reusing for the Risk Matrix screen, confirmed across every module built this
-     stretch (Maintenance/Sub-phase D/Cleaning/Vacant Units needed new backend; Risk Register +
-     Meter Readings needed genuinely none; Admin Settings needed real net-new backend from
-     scratch because nothing existed yet for Company/user-mutation at all): read the relevant
-     `_service.py`/`_repository.py`/`_api.py` files FIRST, every time, before assuming a gap
-     exists OR assuming one doesn't - the answer has gone every direction this stretch, and
-     guessing has been wrong in both directions when tried. Also worth carrying forward: build a
-     response shape needing fields that aren't real ORM columns via an explicit `from_row`
-     classmethod, never `.model_validate()` on an object that doesn't have them (confirmed
-     working six times now); when enriching an EXISTING function rather than adding a new one,
-     check every other caller of it first (Meter Readings' `get_meter_reading` had to stay
-     untouched for this reason); and check scope's OWN role table before assuming a new module's
-     authorization tier matches the "usual" Admin/Manager pattern - Admin Settings this session
-     was the first tier to genuinely exclude Manager, found only by rereading scope §3 rather
-     than copying every prior module's shape.
+1. Commit this batch (the Risk Matrix configuration screen) to git.
+2. **Phase 16 is now FULLY COMPLETE** - every page named in Prompt 16's own list exists and is
+   committed (Dashboard, Properties/Units, Inspection Templates, the full six-sub-phase
+   Inspection engine wizard/Prompt 17's mobile screen, Maintenance, Risk Register, Cleaning,
+   Vacant Units, Meter Readings, Admin Settings, Risk Matrix). `PROJECT_PLAN.md §11`'s exit
+   criteria ("All pages navigable, auth-gated correctly") is met. See the "What has been
+   completed" section above for each module's own detail, and `docs/AI_MEMORY.md`'s dated entries
+   for the full design/build history of each.
+3. **No specific next phase has been chosen yet - this is a real, open decision for the next
+   session, not something to default into.** Per `PROJECT_PLAN.md §11`'s own 20-phase table, the
+   next NAMED phase is **Phase 17: PDF reports** ("Report matches a real submitted inspection
+   exactly") - `docs/AI_MEMORY.md`'s Sub-phase F entry already flagged "Inspection Report" (PDF)
+   as explicitly out of scope for the wizard, deferred specifically to this phase. A library
+   choice (WeasyPrint vs. ReportLab, `PROJECT_PLAN.md §9`) is still undecided. After that, Phase
+   18 (adversarial testing pass, scope §19), Phase 19 (explicit cross-company security
+   verification, scope §20), and Phase 20 (deployment) remain. Don't assume Phase 17 is next
+   without confirming with the owner first - every phase gate in this project so far has stopped
+   for review, not run unattended into the next one.
+4. **Patterns worth carrying into whatever's next**, confirmed repeatedly across this whole
+   Phase-16 stretch: read the relevant `_service.py`/`_repository.py`/`_api.py` files FIRST,
+   every time, before assuming a backend gap exists OR assuming one doesn't - the answer went
+   every direction across Maintenance/Cleaning/Vacant Units (real gaps), Risk Register/Meter
+   Readings/Risk Matrix (none at all), and Admin Settings (real net-new backend from scratch) -
+   guessing was wrong in every direction when tried instead of checking. Build a response shape
+   needing fields that aren't real ORM columns via an explicit `from_row` classmethod, never
+   `.model_validate()` on an object that doesn't have them. When enriching an EXISTING function
+   rather than adding a new one, check every other caller of it first. Check scope's OWN role
+   table before assuming a new module's authorization tier matches the "usual" Admin/Manager
+   pattern - don't copy the previous module's tier by default.
 
 ## Files that require attention
 

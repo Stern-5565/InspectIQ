@@ -46,7 +46,11 @@
  * `/risk-assessments/:id/edit` is gated to `CAN_MANAGE_RISK` - unlike Maintenance, there's no
  * per-record carve-out at all (confirmed by reading risk_service.py: the one combined PATCH is
  * Administrator/Manager only, full stop), so a static role-gated route is sufficient here with
- * no extra per-record computation needed on the page itself.
+ * no extra per-record computation needed on the page itself. `/risk-matrix` has no role gate
+ * either - view is unrestricted (same as list/detail), and `RiskMatrixPage.jsx` computes its own
+ * `canManage` from `CAN_MANAGE_RISK` the same way `CleaningInspectionDetailPage` computes
+ * `canEdit`, since every GET/POST/PATCH it calls already existed since Phase 13 (no new backend
+ * needed - confirmed by reading app/api/risk.py first).
  *
  * Cleaning: view (list/detail) has no role restriction. No `/cleaning-inspections/new` or
  * `/:id/edit` routes at all - mutation is a per-record check computed on
@@ -107,6 +111,7 @@ import { MaintenanceIssueFormPage } from "./pages/maintenance/MaintenanceIssueFo
 import { RiskAssessmentsListPage } from "./pages/risk/RiskAssessmentsListPage";
 import { RiskAssessmentDetailPage } from "./pages/risk/RiskAssessmentDetailPage";
 import { RiskAssessmentFormPage } from "./pages/risk/RiskAssessmentFormPage";
+import { RiskMatrixPage } from "./pages/risk/RiskMatrixPage";
 import { CleaningInspectionsListPage } from "./pages/cleaning/CleaningInspectionsListPage";
 import { CleaningInspectionDetailPage } from "./pages/cleaning/CleaningInspectionDetailPage";
 import { VacantUnitInspectionsListPage } from "./pages/vacant-units/VacantUnitInspectionsListPage";
@@ -167,6 +172,7 @@ export function App() {
 
                 <Route path="/risk-assessments" element={<RiskAssessmentsListPage />} />
                 <Route path="/risk-assessments/:id" element={<RiskAssessmentDetailPage />} />
+                <Route path="/risk-matrix" element={<RiskMatrixPage />} />
 
                 <Route element={<ProtectedRoute allowedRoles={CAN_CONDUCT_INSPECTIONS} />}>
                   <Route path="/risk-assessments/new" element={<RiskAssessmentFormPage />} />

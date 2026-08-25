@@ -2011,3 +2011,60 @@ Telephone edit) cleaned up/restored afterward.
 `RiskMatrixLevels` create/edit, deliberately deferred from the Risk Register module's own pass
 (scope §19's "the exact risk matrix should remain configurable" is real but was treated as a
 secondary feature at the time, not silently dropped).
+
+## 2026-08-25 — Risk Matrix configuration screen built: no new backend at all, and the first module where "check first" meant designing around a real footgun the backend leaves open on purpose
+
+**Closes out every page named in Prompt 16's own list.** Confirmed by reading
+`app/api/risk.py`/`risk_service.py`/`risk_repository.py` first (the same discipline every module
+this stretch has held to) that all three endpoints this screen needs
+(`GET`/`POST`/`PATCH /api/risk-matrix-levels`) already existed since Phase 13 - genuinely zero
+backend changes, the same "sometimes the API surface already IS enough" outcome as Risk
+Register and Meter Readings, now confirmed a third time. Authorization is `CAN_MANAGE_RISK`
+(Administrator/Manager) for mutation, unrestricted view - the tier that predates Admin Settings'
+narrower Admin-only pattern, confirmed by rereading `risk_service.py` rather than assuming the
+newest module's tier applied here too.
+
+**The one real design problem this screen had to solve, and the backend deliberately doesn't
+solve for it**: `risk_repository.get_risk_matrix_for_company`'s own docstring says a company's
+own bands fully REPLACE the global default the instant any exist - so an Administrator adding a
+single custom band (the naive "customize" interaction) would immediately drop every score
+outside that one band from having ANY resolvable risk level, a real 422 the next risk assessment
+would hit (`risk_service._resolve_risk_level`). Solved with a "Customize for your company" action
+that clones the CURRENT effective matrix (whichever `GET` currently returns - the 4 global bands,
+Low/Medium/High/Critical covering 1-25 contiguously) as company-specific rows via 4 sequential
+`POST`s, giving the Administrator a complete, safe starting point to edit from, never a partial
+one. A live `computeCoverageIssues` gap/overlap check (client-side only, sorts bands by
+`MinScore` and walks the 1-25 range) then warns - not blocks - if a later edit leaves a hole,
+mirroring the same "cheap, deliberate safety net for an unrecoverable-feeling mistake" reasoning
+as Admin Settings' self-deactivation guard, not enforced by the backend for the same reason no
+delete endpoint exists (scope doesn't ask for full lifecycle management here).
+
+**New CSS, not reused from an existing component**: `.banner`/`.banner--info`/`.banner--warning`
+(global.css had no generic "informational/warning callout" block before this - `ErrorMessage`
+only covers the error case) and `.risk-matrix__swatch` (a small colored circle next to each
+level name, rendering `ColorHint` visually for the first time anywhere in the frontend - every
+prior module left it as an unused DB column, read only by `StatusBadge`'s own hardcoded tone
+map, never the record's actual stored hex value).
+
+**Verified live as four different users, closing the full loop for real**: as the Northgate
+Administrator, confirmed the global-default banner and all 4 read-only bands rendered correctly
+with no Edit buttons - clicked "Customize for your company," confirmed via a direct DB query
+that exactly 4 new `CompanyId=1` rows were created (global rows untouched) - edited the "Low"
+band's `MaxScore` from 4 to 3 to deliberately open a gap, confirmed the warning banner said
+exactly "Scores 4–4 aren't covered by any level," then fixed it back and confirmed the warning
+disappeared. Confirmed `RiskAssessmentsListPage.jsx`'s own risk-level filter dropdown (which
+reads `getRiskMatrix()` live, unchanged code) picked up the customized matrix automatically -
+proof the two pages are genuinely wired to the same data, not coincidentally similar. Logged in
+as a Viewer: the matrix rendered with no Edit controls (view-only, confirmed). Logged in as the
+Bright Spaces Administrator: still on their OWN untouched global default, with their own
+independent "Customize" option - full cross-company isolation confirmed. Logged in as a Manager:
+Edit/Add-band controls appeared (confirming `CAN_MANAGE_RISK` really does include Manager, unlike
+Admin Settings' narrower tier). All test data (the 4 company-specific rows created during
+verification) cleaned up afterward via a direct DB delete - the same test-cleanup-only escape
+hatch this project has used before for tables with no delete endpoint of their own.
+
+**Phase 16 is now fully complete - every page named in Prompt 16's own list exists.** The
+Inspection engine wizard (Prompt 17) was already done. What remains for InspectIQ overall is
+whatever Phase 17+ named in `PROJECT_PLAN.md §11`'s phase table (Inspection Report/PDF generation
+was explicitly named as out of scope for Sub-phase F, still not built) - no specific next phase
+has been chosen yet, an open decision for a future session.
