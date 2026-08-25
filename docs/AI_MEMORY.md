@@ -1267,3 +1267,55 @@ plus a "view only" notice and was blocked from `/inspections/new` entirely; a Br
 Administrator got a real "Inspection not found." on the same inspection ID; no page-level
 horizontal overflow at 375px; all test data (the inspection and its 102 snapshot responses)
 cleaned up from the real DB afterward.
+
+## 2026-08-25 — Inspection engine Sub-phase B built, a real CSP bug caught by live verification
+
+Photo/Video per question - the frontend's first file-upload UI, per the Sub-phase plan
+(2026-08-25 entry above). `services/mediaService.js` wraps `/api/media` (list/upload/download-
+as-blob/delete); `components/MediaAttachments.jsx` is a generic `entityType`/`entityId`/
+`editable` component, deliberately NOT named or scoped to InspectionResponse - Sub-phases C/E's
+Maintenance/Risk/Cleaning quick-creates will need the identical upload/view/delete UI against a
+different entity, so this is built once as shared infrastructure, not re-ported per module (the
+same reasoning that produced the shared component library in Phase 16's first frontend commit).
+Wired into `InspectionQuestionPage.jsx` below Notes, using the page's existing `editable`
+variable - no new authorization concept, since the backend's own `media_service.py` already
+gates InspectionResponse uploads through `inspection_service.ensure_can_edit` (Phase 9).
+
+**Deliberate scope call, not a gap**: no AllowsPhoto/RequiresPhoto gating. `InspectionResponseSchema`
+doesn't carry those question-level flags in its frozen snapshot (only QuestionText/SectionName/
+AnswerType are, per the Phase 1 §13.1 sign-off), and `inspection_service.py`'s submit gating never
+checks them either - confirmed by grepping the service file before writing any frontend code, not
+assumed. The backend treats "attach evidence" as available on every question uniformly, so the
+component does too, rather than fetching the live template just to decide whether to render
+itself.
+
+**A real, reproduced CSP bug, caught only by live verification, not by reading the code back**:
+`GET /api/media/{id}/download` requires the same Bearer token as every other request (Phase 9),
+so a plain `<img src="https://...">` can't load a thumbnail directly - the design fetches each
+photo as an authenticated blob and renders it via `URL.createObjectURL`. The original CSP
+(`img-src 'self' data:`, no `media-src` at all, `frontend/index.html`) was written before any
+component needed `blob:` URLs and simply didn't allow for them. Every thumbnail failed silently
+in the DOM (no visible error banner - just a broken image) until the browser console was checked:
+a genuine "Loading the image 'blob:...' violates ... img-src" CSP violation, and
+`img.naturalWidth` staying `0` despite `img.complete` being `true`. Fixed by adding `blob:` to
+`img-src` and adding a new `media-src 'self' blob:` directive (for the `<video>` tag videos will
+use) - `connect-src` deliberately did NOT get `blob:` added, since loading an `<img>`/`<video>`
+element's `src` isn't a fetch/XHR call `connect-src` gates at all; only this session's own ad-hoc
+diagnostic `fetch(img.src)` calls needed that (and were discarded, not shipped).
+
+**Verified live, end to end, against a real inspection** (question `InspectionResponseId`, not a
+mock): uploaded two real photos (one hand-built PNG, one canvas-generated one, to rule out "my
+test file was invalid" before concluding it was a CSP bug) - both initially failed to decode
+(`naturalWidth: 0`) with the original CSP, both decoded correctly (`naturalWidth: 20` and `1`)
+after the fix, confirmed via direct DOM inspection, not just "no error shown." Deleted one via the
+confirmation dialog (correct filename shown, real `DELETE` returning `204`, thumbnail and its
+object URL removed from the DOM). Confirmed session persistence: a full hard page reload (not
+just client-side navigation) correctly restored the session via the stored refresh token and
+right back to the same question, with the previously uploaded photo still attached and still
+rendering. Confirmed the error path, not just the happy path: after the test inspection's
+`InspectionResponses` were deleted from the DB (as part of test cleanup), a follow-up upload
+attempt against the now-nonexistent response correctly surfaced "Inspection response not found."
+inline, with no crash and no orphaned upload. Confirmed no page-level horizontal overflow at
+375px with a photo attached. All test data (the inspection, its 102 snapshot responses, and both
+media rows/files) cleaned up afterward - the media rows specifically confirmed clean via the
+app's own delete flow first, with a DB-level check afterward for orphans.

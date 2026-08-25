@@ -42,10 +42,20 @@
       connect-src path-matching is exact-match-or-nothing when a source includes a path at all,
       so reusing VITE_API_BASE_URL (which includes /api) would silently block real requests like
       .../api/health. The origin alone (no path) matches every path under it.
+
+      img-src/media-src include blob: for MediaAttachments (Sub-phase B, Phase 16) - a real,
+      reproduced bug, not a hypothetical one: /api/media/{id}/download requires the same Bearer
+      token as every other request, so photos/videos are fetched as authenticated blobs and
+      rendered via URL.createObjectURL, not a plain <img src="https://...">. The original CSP
+      (img-src 'self' data:, no media-src at all) blocked every thumbnail outright - confirmed by
+      a real "Loading the image 'blob:...' violates ... img-src" console error and every
+      thumbnail's naturalWidth staying 0. connect-src deliberately does NOT get blob: added - the
+      browser loading an <img>/<video> element's src isn't a fetch/XHR call connect-src gates at
+      all, and the app itself never fetch()es a blob: URL (only the object-URL assignment does).
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src %VITE_CSP_STYLE_SRC%; img-src 'self' data:; connect-src 'self' %VITE_API_ORIGIN%; base-uri 'self'; object-src 'none'; form-action 'self';"
+      content="default-src 'self'; script-src 'self'; style-src %VITE_CSP_STYLE_SRC%; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' %VITE_API_ORIGIN%; base-uri 'self'; object-src 'none'; form-action 'self';"
     />
   </head>
   <body>

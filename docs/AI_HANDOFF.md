@@ -805,10 +805,39 @@ Current status. Overwrite/update this file at the end of every session or phase 
     (cross-company isolation) → confirmed no page-level horizontal overflow at 375px mobile
     width → all test data cleaned up from the real DB afterward.
 
+- **Phase 16 continued — Inspection engine wizard, Sub-phase B (Photo/Video per question)
+  complete.** The frontend's first file-upload UI - see `docs/AI_MEMORY.md`'s 2026-08-25 entry
+  for the full story.
+  - `services/mediaService.js` wraps `/api/media` (list/upload/download-as-blob/delete).
+  - `components/MediaAttachments.jsx` - a generic `entityType`/`entityId`/`editable` component,
+    deliberately not scoped to InspectionResponse, since Sub-phases C/E's Maintenance/Risk/
+    Cleaning quick-creates will need the identical upload/view/delete UI against a different
+    entity. Wired into `InspectionQuestionPage.jsx` below Notes, reusing the page's existing
+    `editable` variable - no new authorization concept, since `media_service.py` already gates
+    InspectionResponse uploads through `inspection_service.ensure_can_edit` (Phase 9).
+  - **Deliberate scope call, not a gap**: no AllowsPhoto/RequiresPhoto gating -
+    `InspectionResponseSchema` doesn't carry those question-level flags in its frozen snapshot,
+    and `inspection_service.py`'s submit gating never checks them either (confirmed by grepping
+    the service file first). "Attach evidence" is available on every question uniformly.
+  - **A real, reproduced CSP bug, caught only by live verification**: `GET /api/media/{id}/
+    download` needs the same Bearer token as every request, so thumbnails are fetched as
+    authenticated blobs and rendered via `URL.createObjectURL`, not a plain `<img src>`. The
+    original CSP (`img-src 'self' data:`, no `media-src`) didn't allow `blob:` at all - every
+    thumbnail failed silently (no visible error, just `img.naturalWidth: 0`) until the console
+    showed a real CSP violation. Fixed in `frontend/index.html`: `blob:` added to `img-src`, a
+    new `media-src 'self' blob:' added for `<video>`. `connect-src` deliberately NOT touched -
+    loading an `<img>`/`<video>` element isn't a fetch/XHR call that directive gates.
+  - **Verified live**: uploaded two real photos (confirmed both decode correctly post-fix,
+    `naturalWidth` no longer `0`) → deleted one via the confirmation dialog (real `204`) → a
+    full hard page reload correctly restored the session and the remaining photo → uploading
+    against a since-deleted response correctly showed "Inspection response not found." inline,
+    no crash → no horizontal overflow at 375px → all test data (inspection, 102 responses, both
+    media rows/files) cleaned up afterward.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Inspection engine Sub-phase A) to git is the next
-  action, before starting Sub-phase B (Photo/Video per question).
+- Nothing in progress. Committing this batch (Inspection engine Sub-phase B) to git is the next
+  action, before starting Sub-phase C (Create Maintenance Issue / Create Risk quick-create).
 
 ## Important decisions
 
@@ -923,23 +952,25 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Inspection engine Sub-phase A) to git.
-2. **Phase 16 continues — the Inspection engine wizard, Sub-phase B next.** Prompt 17's "most
+1. Commit this batch (Inspection engine Sub-phase B) to git.
+2. **Phase 16 continues — the Inspection engine wizard, Sub-phase C next.** Prompt 17's "most
    important screen in the application," planned in detail with the owner on 2026-08-25 (see
    `docs/AI_MEMORY.md`'s entries of that date for the full design discussion, including the
-   "gateway sections" discovery that shaped this, and Sub-phase A's own live-verification
+   "gateway sections" discovery that shaped this, and Sub-phases A/B's own live-verification
    findings). Deliberately staged into sub-phases rather than built as one page, each
    independently committable and verifiable:
-   - **Sub-phase A — DONE** (commit pending as of this writing) - the core wizard: Inspection
-     List, Start Inspection, the Sections screen, and the Question screen for the five plain
-     answer types (`YesNo`/`PassFail`/`Condition`/`Text`/`Number`/`Date`), autosave (debounced
-     while typing, not blur-only - a real robustness fix found during verification), and status
-     badges (Answered/Unanswered/Failed, with Not-Applicable correctly taking display
-     precedence over a stale Failed badge - another fix found during verification). See the
-     "What has been completed" entry above for the full detail.
-   - **Sub-phase B (next)** — Photo/Video per question (`POST /api/media`, `EntityType=
-     InspectionResponse`) - the frontend's first file-upload UI.
-   - **Sub-phase C** — Create Maintenance Issue / Create Risk quick-create modals per question
+   - **Sub-phase A — DONE**, commit `fa3006e` - the core wizard: Inspection List, Start
+     Inspection, the Sections screen, and the Question screen for the five plain answer types
+     (`YesNo`/`PassFail`/`Condition`/`Text`/`Number`/`Date`), autosave (debounced while typing,
+     not blur-only - a real robustness fix found during verification), and status badges
+     (Answered/Unanswered/Failed, with Not-Applicable correctly taking display precedence over a
+     stale Failed badge - another fix found during verification). See the "What has been
+     completed" entry above for the full detail.
+   - **Sub-phase B — DONE** (commit pending as of this writing) - Photo/Video per question, via
+     the new generic `components/MediaAttachments.jsx` against `EntityType=InspectionResponse`.
+     A real CSP bug (blob: URLs blocked for thumbnails) was found and fixed - see the "What has
+     been completed" entry above and `docs/AI_MEMORY.md`'s 2026-08-25 entry for the full story.
+   - **Sub-phase C (next)** — Create Maintenance Issue / Create Risk quick-create modals per question
      (minimal fields, `InspectionResponseId` supplied so the backend derives Property/Location
      itself, same as every other creation path into those two modules).
    - **Sub-phase D** — the `MeterReading` answer type's own flow (photo → mock OCR →

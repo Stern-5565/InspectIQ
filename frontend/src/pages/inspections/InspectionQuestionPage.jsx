@@ -1,8 +1,9 @@
 /**
  * "Inside each question: question text, answer controls, notes, ... Previous/Next" (Prompt
- * 17). Photo/Video/Create Maintenance/Create Risk buttons are NOT here yet - they're
- * sub-phases B/C of the staged plan (docs/AI_HANDOFF.md, 2026-08-25) - showing non-functional
- * buttons for them would be worse than not showing them at all.
+ * 17). Photo/Video is wired (Sub-phase B, via components/MediaAttachments.jsx against
+ * EntityType=InspectionResponse). Create Maintenance/Create Risk buttons are NOT here yet -
+ * that's Sub-phase C of the staged plan (docs/AI_HANDOFF.md, 2026-08-25) - showing
+ * non-functional buttons for them would be worse than not showing them at all.
  *
  * Answer types YesNo/PassFail/Condition render as tap buttons (instant save, no separate save
  * step - "as few taps as possible"). Text/Number/Notes debounce-save WHILE typing (700ms after
@@ -19,6 +20,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { MediaAttachments } from "../../components/MediaAttachments";
 import { StatusBadge } from "../../components/StatusBadge";
 import { updateResponse } from "../../services/inspectionService";
 import { getErrorMessage } from "../../utilities/apiError";
@@ -280,6 +282,12 @@ export function InspectionQuestionPage() {
             }}
           />
         </label>
+
+        <MediaAttachments
+          entityType="InspectionResponse"
+          entityId={response.InspectionResponseId}
+          editable={editable}
+        />
       </div>
 
       <div className="question-nav">

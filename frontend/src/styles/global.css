@@ -992,6 +992,80 @@ h3 {
   margin-bottom: var(--spacing-4);
 }
 
+/* --- MediaAttachments (Photo/Video, Sub-phase B) --- */
+
+.media-attachments {
+  margin-top: var(--spacing-2);
+}
+
+.media-attachments__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-2);
+}
+
+.media-attachments__title {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.media-attachments__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.media-thumb {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+}
+
+.media-thumb__media {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.media-thumb__delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  border: none;
+  border-radius: 50%;
+  background: rgba(15, 18, 28, 0.65);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- Visually-hidden utility (e.g. the native file input MediaAttachments triggers by proxy) --- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* --- Desktop (also works at wider viewport) --- */
 
 @media (min-width: 768px) {
