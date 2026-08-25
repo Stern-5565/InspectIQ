@@ -1,9 +1,11 @@
 /**
  * "Inside each question: question text, answer controls, notes, ... Previous/Next" (Prompt
  * 17). Photo/Video is wired (Sub-phase B, via components/MediaAttachments.jsx against
- * EntityType=InspectionResponse). Create Maintenance/Create Risk buttons are NOT here yet -
- * that's Sub-phase C of the staged plan (docs/AI_HANDOFF.md, 2026-08-25) - showing
- * non-functional buttons for them would be worse than not showing them at all.
+ * EntityType=InspectionResponse). Create Maintenance/Create Risk are wired too (Sub-phase C),
+ * gated on `canRaiseIssues` from InspectionWizardLayout - deliberately NOT `editable`, since
+ * the backend's create_issue/create_risk_assessment only require CAN_CONDUCT_INSPECTIONS
+ * company membership, not being this inspection's assigned inspector (see
+ * InspectionWizardLayout.jsx's own comment on the distinction).
  *
  * Answer types YesNo/PassFail/Condition render as tap buttons (instant save, no separate save
  * step - "as few taps as possible"). Text/Number/Notes debounce-save WHILE typing (700ms after
@@ -20,8 +22,11 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { CreateMaintenanceIssueModal } from "../../components/CreateMaintenanceIssueModal";
+import { CreateRiskAssessmentModal } from "../../components/CreateRiskAssessmentModal";
 import { MediaAttachments } from "../../components/MediaAttachments";
 import { StatusBadge } from "../../components/StatusBadge";
+import { Toast } from "../../components/Toast";
 import { updateResponse } from "../../services/inspectionService";
 import { getErrorMessage } from "../../utilities/apiError";
 import { isAnswered, isFailed } from "../../utilities/inspectionAnswers";
@@ -180,7 +185,7 @@ function AnswerControl({ response, editable, onSave, saving }) {
 export function InspectionQuestionPage() {
   const { id, sectionIndex, questionIndex } = useParams();
   const navigate = useNavigate();
-  const { inspection, canEdit, applyResponseUpdate } = useOutletContext();
+  const { inspection, canEdit, canRaiseIssues, applyResponseUpdate } = useOutletContext();
 
   const sectionIdx = Number(sectionIndex);
   const questionIdx = Number(questionIndex);
@@ -191,6 +196,9 @@ export function InspectionQuestionPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [debouncedSaveNotes, flushSaveNotes] = useDebouncedCallback((value) => save({ Notes: value }));
+  const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
+  const [showRiskModal, setShowRiskModal] = useState(false);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     setNotesValue(response?.Notes ?? "");
@@ -288,7 +296,42 @@ export function InspectionQuestionPage() {
           entityId={response.InspectionResponseId}
           editable={editable}
         />
+
+        {canRaiseIssues && (
+          <div className="question-card__quick-actions">
+            <button type="button" className="button button--secondary button--small" onClick={() => setShowMaintenanceModal(true)}>
+              + Create Maintenance Issue
+            </button>
+            <button type="button" className="button button--secondary button--small" onClick={() => setShowRiskModal(true)}>
+              + Create Risk Assessment
+            </button>
+          </div>
+        )}
       </div>
+
+      <CreateMaintenanceIssueModal
+        open={showMaintenanceModal}
+        inspectionResponseId={response.InspectionResponseId}
+        defaultTitle={response.QuestionTextSnapshot}
+        onClose={() => setShowMaintenanceModal(false)}
+        onCreated={(issue) => {
+          setShowMaintenanceModal(false);
+          setToast(`Maintenance issue "${issue.Title}" created.`);
+        }}
+      />
+
+      <CreateRiskAssessmentModal
+        open={showRiskModal}
+        inspectionResponseId={response.InspectionResponseId}
+        defaultHazard={response.QuestionTextSnapshot}
+        onClose={() => setShowRiskModal(false)}
+        onCreated={(risk) => {
+          setShowRiskModal(false);
+          setToast(`Risk assessment created (Risk Level: ${risk.RiskLevel}).`);
+        }}
+      />
+
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 
       <div className="question-nav">
         <button type="button" className="button button--secondary" disabled={!previousPosition} onClick={() => previousPosition && goTo(previousPosition)}>

@@ -992,6 +992,17 @@ h3 {
   margin-bottom: var(--spacing-4);
 }
 
+/* --- Question card quick-actions (Create Maintenance Issue / Create Risk, Sub-phase C) --- */
+
+.question-card__quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-4);
+  padding-top: var(--spacing-3);
+  border-top: 1px solid var(--color-border);
+}
+
 /* --- MediaAttachments (Photo/Video, Sub-phase B) --- */
 
 .media-attachments {

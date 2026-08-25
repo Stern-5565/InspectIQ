@@ -12,6 +12,14 @@
  * CAN_CONDUCT_INSPECTIONS role check alone is NOT enough, since a different Inspector at the
  * same company must NOT get edit controls for someone else's inspection - see
  * constants/roles.js's own comment on this).
+ *
+ * `canRaiseIssues` is a DIFFERENT, wider check, also computed once here - Sub-phase C's Create
+ * Maintenance Issue/Create Risk quick-creates deliberately do NOT use `canEdit`.
+ * maintenance_service.create_issue/risk_service.create_risk_assessment resolve the inspection
+ * via inspection_service.get_inspection (a VIEW-level lookup), never ensure_can_edit - so any
+ * Administrator/Manager/Inspector at the company can raise an issue against any response, not
+ * just the inspector assigned to that specific inspection. Confirmed by reading both service
+ * functions before building the frontend gate, not assumed from the answering/photos precedent.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Outlet, useParams } from "react-router-dom";
@@ -19,7 +27,7 @@ import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { useAuth } from "../../contexts/AuthContext";
 import { hasAnyRole } from "../../utilities/permissions";
-import { ADMINISTRATOR, MANAGER } from "../../constants/roles";
+import { ADMINISTRATOR, MANAGER, CAN_CONDUCT_INSPECTIONS } from "../../constants/roles";
 import { getInspection } from "../../services/inspectionService";
 import { getProperty } from "../../services/propertyService";
 import { getErrorMessage } from "../../utilities/apiError";
@@ -78,6 +86,7 @@ export function InspectionWizardLayout() {
   }
 
   const canEdit = hasAnyRole(user, [ADMINISTRATOR, MANAGER]) || user.UserId === inspection.InspectorUserId;
+  const canRaiseIssues = hasAnyRole(user, CAN_CONDUCT_INSPECTIONS);
 
   return (
     <Outlet
@@ -85,6 +94,7 @@ export function InspectionWizardLayout() {
         inspection,
         property,
         canEdit,
+        canRaiseIssues,
         reload: load,
         applyResponseUpdate,
         applyInspectionUpdate,

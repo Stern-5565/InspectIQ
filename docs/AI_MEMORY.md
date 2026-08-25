@@ -1319,3 +1319,63 @@ inline, with no crash and no orphaned upload. Confirmed no page-level horizontal
 375px with a photo attached. All test data (the inspection, its 102 snapshot responses, and both
 media rows/files) cleaned up afterward - the media rows specifically confirmed clean via the
 app's own delete flow first, with a DB-level check afterward for orphans.
+
+## 2026-08-25 — Inspection engine Sub-phase C built, a real authorization distinction found by reading the service code first
+
+Create Maintenance Issue / Create Risk quick-create modals, per the Sub-phase plan. New
+`services/maintenanceService.js`/`riskService.js` (one function each, `createMaintenanceIssue`/
+`createRiskAssessment` - the full Maintenance/Risk Register modules aren't built yet, so nothing
+else was needed), `components/Modal.jsx` (a small shared backdrop/Escape shell reusing
+ConfirmationDialog's CSS, so the two new forms don't duplicate that plumbing), and
+`components/CreateMaintenanceIssueModal.jsx`/`CreateRiskAssessmentModal.jsx`. Genuinely minimal
+fields (Title/Category/Priority/Description; Hazard/Likelihood/Severity/Notes) - only
+`InspectionResponseId` is sent as linkage, since both backend services derive Property/
+Inspection/Location themselves. `constants/riskOptions.js` uses `docs/SCOPE.md` §19's own exact
+Likelihood/Severity scale text (1 Rare/2 Unlikely/.../1 Insignificant/2 Minor/...), not an
+invented one - checked the scope document for this before writing a labeling scheme from
+scratch.
+
+**A real authorization distinction, caught by reading the two service functions BEFORE wiring
+the frontend gate, not by copying Sub-phase B's `editable` precedent**: it would have been
+natural to gate these two new buttons the same way Photo/Video is gated (`editable` - the
+assigned-inspector-or-Admin/Manager rule). But `maintenance_service.create_issue`/
+`risk_service.create_risk_assessment` resolve the inspection via `inspection_service.
+get_inspection` - a VIEW-level lookup, confirmed by reading both functions line by line, never
+`ensure_can_edit`. So any Administrator/Manager/Inspector at the company can raise an issue or a
+risk against ANY response, not just the inspector assigned to that specific inspection - a
+Manager reviewing someone else's in-progress inspection, or another qualified person who
+happens to notice something, can legitimately flag a hazard even though they can't touch the
+response's own answer. This produced a new `canRaiseIssues` computed once in
+`InspectionWizardLayout.jsx` (any `CAN_CONDUCT_INSPECTIONS` role, unconditioned on
+"assigned to this inspection"), separate from `canEdit`. **Standing lesson reinforced** (same
+shape as Phase 11's "a new module resembling a previous one doesn't mean copying its
+authorization shape" and Phase 14's "verify which action a permission check actually gates"):
+the fact that two features sit on the same page and touch the same InspectionResponseId does not
+mean they share an authorization boundary - each backend service call needed independent
+verification.
+
+**Verified live, end to end, against a real inspection**: created a real Maintenance Issue
+(Title pre-filled from the question text as a small "few taps" nicety, Category required) -
+confirmed via direct DB query that PropertyId/InspectionId were correctly derived server-side
+and Location auto-filled to `"{SectionName} - {QuestionText}"` exactly as
+`maintenance_service.py` documents. Created a real Risk Assessment using scope §19's own worked
+example (Likelihood=4, Severity=5) - confirmed `RiskScore=20`/`RiskLevel=Critical` both in the
+success toast and via a direct DB query, matching the scope document's own stated 17-25=Critical
+band. Confirmed native HTML5 `required` validation blocks an empty Category/Likelihood/Severity
+selection before the form's own JS validation even runs (an empty-string placeholder `<option>`
+correctly fails `checkValidity()`) - matching every other required `SelectField` in this
+codebase, not something this sub-phase needed to add. Confirmed a Viewer (not in
+`CAN_CONDUCT_INSPECTIONS`) sees neither button. All test data (the inspection, its 102 snapshot
+responses, the maintenance issue, and the risk assessment) cleaned up from the real DB
+afterward.
+
+**A testing-tooling note, not an app bug, worth remembering for future live-verification
+sessions**: `computer.left_click` by coordinate/ref intermittently failed to actually trigger a
+button's click handler in this session (silently - no error, just no state change), while
+`element.click()` via `javascript_tool` worked reliably every time on the same elements.
+Suspected cause: a mismatch between the tool's reported coordinate frame and the page's actual
+layout after `resize_window` calls earlier in the session. Switched to JS-based `.click()` for
+the remainder of this session's verification once this was noticed, and confirmed a "no visible
+change after clicking" result should be checked with a coordinate-independent method before
+concluding the underlying app feature is broken - it wasn't, twice, before this was diagnosed
+correctly.

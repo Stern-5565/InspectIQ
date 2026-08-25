@@ -834,10 +834,46 @@ Current status. Overwrite/update this file at the end of every session or phase 
     no crash → no horizontal overflow at 375px → all test data (inspection, 102 responses, both
     media rows/files) cleaned up afterward.
 
+- **Phase 16 continued — Inspection engine wizard, Sub-phase C (Create Maintenance Issue /
+  Create Risk quick-create) complete.**
+  - `services/maintenanceService.js` (`createMaintenanceIssue`) and `services/riskService.js`
+    (`createRiskAssessment`) - each wraps only the one endpoint Sub-phase C needs; the full
+    Maintenance/Risk Register modules (list/detail/assign/status/timeline) are still unbuilt
+    Phase 16 pages.
+  - `components/Modal.jsx` - a small shared backdrop/Escape shell (reusing ConfirmationDialog's
+    `.dialog-backdrop`/`.dialog` CSS) so the two new quick-create forms don't duplicate it.
+    `components/CreateMaintenanceIssueModal.jsx`/`CreateRiskAssessmentModal.jsx` - genuinely
+    minimal fields (Title/Category/Priority/Description; Hazard/Likelihood/Severity/Notes) -
+    only `InspectionResponseId` is sent as linkage, since both backend services derive Property/
+    Inspection/Location themselves and would ignore a client-supplied PropertyId anyway.
+    `constants/maintenanceOptions.js` mirrors `MaintenanceCategory`/`MaintenancePriority`;
+    `constants/riskOptions.js` uses scope §19's own exact Likelihood/Severity scale text (Rare/
+    Unlikely/.../Insignificant/Minor/...), not an invented one.
+  - **A real authorization distinction, caught by reading the service code first, not assumed
+    from the Sub-phase B precedent**: these buttons are gated on a NEW `canRaiseIssues` (any
+    `CAN_CONDUCT_INSPECTIONS` role), computed once in `InspectionWizardLayout.jsx` alongside
+    `canEdit` - deliberately NOT `editable`. `maintenance_service.create_issue`/
+    `risk_service.create_risk_assessment` resolve the inspection via `inspection_service.
+    get_inspection` (a VIEW-level lookup), never `ensure_can_edit` - so any Administrator/
+    Manager/Inspector at the company can raise an issue or risk against any response, not just
+    the inspector assigned to that specific inspection. Confirmed by grepping both service
+    functions before wiring the frontend gate.
+  - **Verified live**: created a real Maintenance Issue (Title pre-filled from the question
+    text, Category required via native HTML5 validation blocking an empty selection before the
+    form's own JS validation even runs) - confirmed server-side via direct DB query that
+    PropertyId/InspectionId were correctly derived and Location auto-filled from the response
+    snapshot exactly as `maintenance_service.py` documents. Created a real Risk Assessment
+    (Likelihood=4/Severity=5, scope's own worked example) - confirmed `RiskScore=20`/
+    `RiskLevel=Critical` both in the toast and via direct DB query. Confirmed a Viewer (not in
+    `CAN_CONDUCT_INSPECTIONS`) sees neither button, matching the Photo/Video gating precedent
+    for that role even though the underlying authorization rule is different. All test data
+    (inspection, 102 responses, the issue, the risk assessment) cleaned up afterward.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Inspection engine Sub-phase B) to git is the next
-  action, before starting Sub-phase C (Create Maintenance Issue / Create Risk quick-create).
+- Nothing in progress. Committing this batch (Inspection engine Sub-phase C) to git is the next
+  action, before starting Sub-phase D (the MeterReading answer type's photo → mock OCR → confirm
+  flow).
 
 ## Important decisions
 
@@ -952,11 +988,11 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Inspection engine Sub-phase B) to git.
-2. **Phase 16 continues — the Inspection engine wizard, Sub-phase C next.** Prompt 17's "most
+1. Commit this batch (Inspection engine Sub-phase C) to git.
+2. **Phase 16 continues — the Inspection engine wizard, Sub-phase D next.** Prompt 17's "most
    important screen in the application," planned in detail with the owner on 2026-08-25 (see
    `docs/AI_MEMORY.md`'s entries of that date for the full design discussion, including the
-   "gateway sections" discovery that shaped this, and Sub-phases A/B's own live-verification
+   "gateway sections" discovery that shaped this, and Sub-phases A/B/C's own live-verification
    findings). Deliberately staged into sub-phases rather than built as one page, each
    independently committable and verifiable:
    - **Sub-phase A — DONE**, commit `fa3006e` - the core wizard: Inspection List, Start
@@ -966,14 +1002,16 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
      (Answered/Unanswered/Failed, with Not-Applicable correctly taking display precedence over a
      stale Failed badge - another fix found during verification). See the "What has been
      completed" entry above for the full detail.
-   - **Sub-phase B — DONE** (commit pending as of this writing) - Photo/Video per question, via
-     the new generic `components/MediaAttachments.jsx` against `EntityType=InspectionResponse`.
-     A real CSP bug (blob: URLs blocked for thumbnails) was found and fixed - see the "What has
-     been completed" entry above and `docs/AI_MEMORY.md`'s 2026-08-25 entry for the full story.
-   - **Sub-phase C (next)** — Create Maintenance Issue / Create Risk quick-create modals per question
-     (minimal fields, `InspectionResponseId` supplied so the backend derives Property/Location
-     itself, same as every other creation path into those two modules).
-   - **Sub-phase D** — the `MeterReading` answer type's own flow (photo → mock OCR →
+   - **Sub-phase B — DONE**, commit `9eb11c6` - Photo/Video per question, via the new generic
+     `components/MediaAttachments.jsx` against `EntityType=InspectionResponse`. A real CSP bug
+     (blob: URLs blocked for thumbnails) was found and fixed - see the "What has been completed"
+     entry above and `docs/AI_MEMORY.md`'s 2026-08-25 entry for the full story.
+   - **Sub-phase C — DONE** (commit pending as of this writing) - Create Maintenance Issue /
+     Create Risk quick-create modals, gated on a NEW `canRaiseIssues` check (deliberately not
+     `editable` - a real authorization distinction from Photo/Video, see the "What has been
+     completed" entry above). Minimal fields; `InspectionResponseId` supplied so the backend
+     derives Property/Location itself, same as every other creation path into those two modules.
+   - **Sub-phase D (next)** — the `MeterReading` answer type's own flow (photo → mock OCR →
      confirm/correct, wired to `/api/meter-readings`, not the generic response-update endpoint).
    - **Sub-phase E** — the two global "gateway" quick-actions confirmed necessary by the seed
      data's own design comment (`database/seed/12_SeedInspectionTemplate.sql`'s file header):
