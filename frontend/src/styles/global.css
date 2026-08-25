@@ -724,6 +724,11 @@ h3 {
   padding: var(--spacing-4);
   width: 100%;
   max-width: 420px;
+  /* ConfirmationDialog's own content is always short, but Sub-phase E's Add Empty Unit modal
+     has ~15 fields (scope §7's full checklist) - without this, a tall form has no way to
+     scroll and gets clipped by the viewport, especially on mobile. */
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 .dialog__title {

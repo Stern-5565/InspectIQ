@@ -915,11 +915,60 @@ Current status. Overwrite/update this file at the end of every session or phase 
     "Correct this reading". No mobile overflow at 375px. All test data (inspection, 102
     responses, the meter reading, its media row and file) cleaned up afterward.
 
+- **Phase 16 continued — Inspection engine wizard, Sub-phase E (the two global "gateway"
+  quick-actions: Add Empty Unit / Grade Cleaning Area) complete.** No backend changes needed -
+  both endpoints already existed. Placed on `InspectionSectionsPage.jsx`, not any one question
+  screen - the seeded template's "Vacant Units"/"Communal Cleaning" sections only ask the
+  inspector to CONFIRM these were recorded elsewhere.
+  - `services/cleaningService.js` (listAreas/createCleaningInspection), `services/
+    vacantUnitService.js` (createVacantUnitInspection - `listUnits` already existed in
+    `unitService.js`), `constants/cleaningOptions.js` (`CLEANING_GRADE_OPTIONS` using scope
+    §16's own descriptive wording, e.g. "D - Poor (significant cleaning required)").
+  - `components/AddEmptyUnitModal.jsx` - genuinely all of scope §7's fields, not a trimmed-down
+    "minimal" set like Sub-phase C's modals: Unit, Date identified vacant, Condition, and all 11
+    Yes/No/Not-checked tri-state checks (Electricity on?/Water on?/.../Maintenance required?),
+    plus Notes. A small local `TriStateRow` sub-component renders each check as three buttons
+    (reusing the `.answer-button`/`.answer-buttons` CSS the plain-question YesNo/PassFail
+    controls already use, for visual consistency, not new styling). Photos/Videos and "creatable
+    maintenance issue from any of these questions" are real scope items, deliberately NOT here -
+    documented in the component's own header comment as a follow-on refinement, the same
+    explicit-deferral practice Sub-phase A used for its own buttons.
+  - `components/GradeCleaningAreaModal.jsx` - Area/Grade/Cleaning required/Urgent/Notes;
+    Assigned cleaner/Due date/Status deliberately deferred (Status has no field at all - it
+    starts "Pending" automatically since no `AssignedUserId` is supplied).
+  - **Both gateway create actions are gated on `editable`, NOT `canRaiseIssues`** - confirmed by
+    reading `vacant_unit_service.create_vacant_unit_inspection` and `cleaning_service.
+    create_cleaning_inspection` before wiring either button: both call
+    `inspection_service.ensure_can_edit`, unlike Sub-phase C/D's create actions. The two gateway
+    actions happened to land on the same tier as each other, but each was verified
+    independently, not assumed from the other.
+  - **A real, foreseeable CSS bug found before it could surface live, then confirmed with an
+    actual measurement**: `.dialog` (shared by every modal since ConfirmationDialog) had no
+    `max-height`/`overflow-y` - fine for short content, but `AddEmptyUnitModal`'s ~15 fields
+    would overflow the viewport with no way to scroll, especially on mobile. Added
+    `max-height: 90vh; overflow-y: auto` to `.dialog` globally (benefits any future
+    longer-content modal too). Confirmed necessary, not speculative: measured at 375px width,
+    the dialog's real content was `2267px` tall against a `731px` constrained `clientHeight`,
+    `scrollHeight > clientHeight` confirming the scroll actually engages.
+  - **Verified live**: started a real inspection on "Elm Court" (the demo property with actual
+    seeded `CleaningAreas`, unlike "15 High Road"). Add Empty Unit - real units loaded in the
+    select, toggled two tri-state checks to real (non-null) values, saved - confirmed via direct
+    DB query that `ElectricityOn`/`SignsOfDamp` stored correctly and `WaterOn` stayed genuinely
+    `NULL` (untouched), AND that the unit's `OccupancyStatus` flipped `Occupied` → `Vacant` (the
+    Phase 12 side effect, now reachable from the wizard for the first time). Grade Cleaning Area
+    - real areas loaded, graded "E" with `CleaningRequired=true` - confirmed via direct DB query
+    (a first checkbox-toggle test using the native-property-setter pattern silently didn't take;
+    switching to a plain `.click()` on the checkbox element resolved it - a testing-tooling
+    quirk, re-verified as NOT an app bug via a second real save). Confirmed a Viewer sees neither
+    button on the Sections screen. Confirmed the mobile scroll fix live (see above). All test
+    data (inspection, 102 responses, the vacant-unit record, the cleaning record) cleaned up
+    afterward, including manually restoring the demo unit's `OccupancyStatus` back to
+    `Occupied`.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Inspection engine Sub-phase D) to git is the next
-  action, before starting Sub-phase E (the two global "gateway" quick-actions: Add Empty Unit /
-  Grade Cleaning Area).
+- Nothing in progress. Committing this batch (Inspection engine Sub-phase E) to git is the next
+  action, before starting Sub-phase F (Inspection Review and Submit - the final sub-phase).
 
 ## Important decisions
 
@@ -1034,13 +1083,13 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Inspection engine Sub-phase D) to git.
-2. **Phase 16 continues — the Inspection engine wizard, Sub-phase E next.** Prompt 17's "most
-   important screen in the application," planned in detail with the owner on 2026-08-25 (see
-   `docs/AI_MEMORY.md`'s entries of that date for the full design discussion, including the
-   "gateway sections" discovery that shaped this, and Sub-phases A/B/C/D's own live-verification
-   findings). Deliberately staged into sub-phases rather than built as one page, each
-   independently committable and verifiable:
+1. Commit this batch (Inspection engine Sub-phase E) to git.
+2. **Phase 16 continues — the Inspection engine wizard, Sub-phase F next (the final sub-phase).**
+   Prompt 17's "most important screen in the application," planned in detail with the owner on
+   2026-08-25 (see `docs/AI_MEMORY.md`'s entries of that date for the full design discussion,
+   including the "gateway sections" discovery that shaped this, and Sub-phases A/B/C/D/E's own
+   live-verification findings). Deliberately staged into sub-phases rather than built as one
+   page, each independently committable and verifiable:
    - **Sub-phase A — DONE**, commit `fa3006e` - the core wizard: Inspection List, Start
      Inspection, the Sections screen, and the Question screen for the five plain answer types
      (`YesNo`/`PassFail`/`Condition`/`Text`/`Number`/`Date`), autosave (debounced while typing,
@@ -1064,14 +1113,15 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
      backend addition (`inspection_response_id` filter on `GET /api/meter-readings`) and a third
      distinct authorization shape (create vs. confirm) were both found by reading the service
      code first - see the "What has been completed" entry above.
-   - **Sub-phase E (next)** — the two global "gateway" quick-actions confirmed necessary by the seed
-     data's own design comment (`database/seed/12_SeedInspectionTemplate.sql`'s file header):
-     "Add Empty Unit" (`POST /api/inspections/{id}/vacant-unit-inspections` family) and "Grade
-     Cleaning Area" (`POST /api/inspections/{id}/cleaning`) - available throughout the
-     inspection, not tied to one question, since the gateway sections (Vacant Units, Communal
-     Cleaning) only ask the inspector to CONFIRM these were done elsewhere, not answer regular
-     checklist questions.
-   - **Sub-phase F** — Inspection Review (now genuinely useful thanks to the new
+   - **Sub-phase E — DONE** (commit pending as of this writing) - the two global "gateway"
+     quick-actions confirmed necessary by the seed data's own design comment (`database/seed/
+     12_SeedInspectionTemplate.sql`'s file header): "Add Empty Unit" and "Grade Cleaning Area",
+     placed on the Sections screen rather than any one question. No backend changes needed - both
+     already gated create on `ensure_can_edit`, confirmed by reading each service function
+     first. Found and fixed a real CSS gap (`.dialog` had no `max-height`/scroll, which
+     `AddEmptyUnitModal`'s ~15-field form would have overflowed) before it could surface as a
+     live bug. See the "What has been completed" entry above for the full detail.
+   - **Sub-phase F (next)** — Inspection Review (now genuinely useful thanks to the new
      `PATCH /api/inspections/{id}` - lets the inspector set `OverallCondition`/
      `OverallRiskRating`/`GeneralNotes` before submitting) and Submit. "Inspection Report" (PDF)
      is explicitly OUT of scope for all of this - it depends on backend Phase 17

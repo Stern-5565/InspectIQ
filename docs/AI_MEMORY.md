@@ -1444,3 +1444,75 @@ reading". No horizontal overflow at 375px. All test data (the inspection, its 10
 responses, the meter reading, its media row, and the actual file on disk) cleaned up afterward -
 the cleanup order itself surfaced a real (expected) FK: `MeterReadings.PhotoMediaFileId`
 references `MediaFiles`, so the reading row must be deleted before its media row, not after.
+
+## 2026-08-25 — Inspection engine Sub-phase E built: the two "gateway" quick-actions, no backend changes needed this time
+
+"Add Empty Unit" and "Grade Cleaning Area" - the two global quick-actions the "gateway sections"
+discovery (this date's earlier planning entry) identified as necessary, since the seeded
+template's "Vacant Units"/"Communal Cleaning" sections only ask the inspector to CONFIRM these
+were recorded elsewhere, not answer regular checklist questions. Placed on
+`InspectionSectionsPage.jsx`, not any one question screen - the first sub-phase to add UI outside
+`InspectionQuestionPage.jsx` itself. Unlike every other sub-phase this session, no backend
+addition was needed - both `POST /api/inspections/{id}/vacant-unit-inspections` and
+`POST /api/inspections/{id}/cleaning` already existed exactly as needed from Phases 11/12.
+
+**`AddEmptyUnitModal.jsx` uses scope §7's FULL field list, not a trimmed "minimal fields" set
+like Sub-phase C's modals** - a deliberate, considered departure from that precedent, not an
+inconsistency: Sub-phase C's Maintenance/Risk fields were incidental detail-capture with a
+whole dedicated module still to come; this modal IS the actual, only planned creation surface for
+a vacant-unit record inside this wizard (the eventual standalone "Vacant Units" page, per Phase
+16's own remaining-pages list, is a management/list view of existing records, not a second
+creation path) - so the real checklist content (11 Yes/No/Not-checked tri-state fields, per
+scope's own text) belongs here now, not deferred to a page that will never itself be the primary
+way one gets created. A small local `TriStateRow` renders each check as three buttons, reusing
+the `.answer-button`/`.answer-buttons` CSS the plain-question YesNo/PassFail answer types already
+use - visual consistency for free, not new styling invented for this one form.
+
+**Confirmed independently, not assumed from precedent**: both `vacant_unit_service.
+create_vacant_unit_inspection` and `cleaning_service.create_cleaning_inspection` call
+`inspection_service.ensure_can_edit` - so both gateway create buttons are gated on `editable`,
+the SAME tier Photo/Video uses, unlike every "create" action from Sub-phases C/D (Maintenance/
+Risk/MeterReading-photo), which had no such check. This is genuinely a fourth data point on the
+same standing lesson (never assume a create-adjacent action's authorization boundary from a
+different create action, even on the same page) - it just happened to land on `editable` this
+time rather than `canRaiseIssues`, confirmed by reading both service functions rather than
+guessing from the fact that they're both "create" actions like Sub-phase C/D's were.
+
+**A real CSS gap, found by reasoning about the new form's size BEFORE it ever ran, then confirmed
+with an actual measurement, not left as a hunch**: `.dialog` (shared by ConfirmationDialog and
+every quick-create modal since Sub-phase C) had no `max-height` or `overflow-y` - unnoticed until
+now because every prior modal's content was short enough to fit any real viewport. Anticipated
+that `AddEmptyUnitModal`'s ~15 fields (11 tri-state rows alone) would not fit, especially at
+375px, added `max-height: 90vh; overflow-y: auto` to `.dialog` globally (helps any future
+longer-content modal too, not just this one) BEFORE live-verifying - then confirmed the fix was
+actually necessary, not speculative caution: measured the real dialog at 375px width,
+`scrollHeight` was `2267px` against a `731px` constrained `clientHeight`, with `overflowY: auto`
+and `isScrollable: true` both confirmed via `getComputedStyle`/direct DOM measurement.
+
+**A testing-tooling false alarm, caught and correctly diagnosed rather than reported as an app
+bug**: the first attempt to check "Cleaning required" via the native-property-setter pattern
+(the same one used successfully throughout this session for `<select>`/`<input type="text">`)
+silently didn't stick for a `<input type="checkbox">` - the created record came back
+`CleaningRequired: false` despite the DOM showing `checked: true` moments before submit. Rather
+than concluding the checkbox wiring was broken, re-ran the exact same flow using a plain
+`element.click()` instead, confirmed `checked` stayed `true` on a delayed re-read (ruling out a
+momentary flicker), and got a real `CleaningRequired: true` row in the database on the second
+attempt - the component was correct all along; the descriptor-based setter approach specifically
+doesn't reliably drive a checkbox's React `onChange` in this environment, `.click()` does. Worth
+remembering for any future live-verification session involving a checkbox: prefer `.click()`
+over the native-setter dance, which this session already knew works for text/select inputs but
+had not yet tried on a checkbox.
+
+**Verified live, end to end**: started a real inspection on "Elm Court" specifically (the one
+demo property with actual seeded `CleaningAreas` - "15 High Road" has none, an HMO by design per
+Phase 11's seed data) - both gateway buttons appeared on the Sections screen. Add Empty Unit:
+real units loaded, two tri-state checks toggled to real values, saved - confirmed via direct DB
+query that `ElectricityOn=false`/`SignsOfDamp=true` were stored correctly and `WaterOn` stayed
+genuinely `NULL` (untouched, not defaulted), AND that the unit's `OccupancyStatus` flipped
+`Occupied` → `Vacant` - the Phase 12 side effect, reachable from the actual wizard UI for the
+first time (previously only exercised via direct API tests). Grade Cleaning Area: real areas
+loaded, graded "E" with `CleaningRequired=true` on the corrected second attempt - confirmed via
+direct DB query. Confirmed a Viewer sees neither button on the Sections screen. Confirmed the
+375px scroll fix with real measurements (above). All test data (the inspection, its 102 snapshot
+responses, the vacant-unit record, the cleaning record) cleaned up afterward, including manually
+restoring the demo unit's `OccupancyStatus` back to `Occupied`.
