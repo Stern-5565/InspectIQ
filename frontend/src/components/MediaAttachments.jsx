@@ -17,6 +17,14 @@
  * send an Authorization header and this endpoint isn't publicly reachable. Object URLs are
  * revoked on unmount/entity change and on delete, to avoid leaking memory over a long inspection
  * session with many photos.
+ *
+ * `onUpload` (optional): overrides the default generic `mediaService.uploadMedia` call for
+ * CREATE only - list/download/delete always go through the generic endpoint regardless, since
+ * viewing/removing a MaintenanceIssue's photos needs no special handling. Added for the
+ * Maintenance module: `maintenance_service.upload_photo` writes a `PhotoUploaded` timeline entry
+ * that the generic `/api/media` endpoint knows nothing about, so MaintenanceIssueDetailPage
+ * passes `onUpload={(file) => uploadMaintenancePhoto(issueId, file)}` to keep the timeline
+ * accurate - every other caller omits it and gets the plain generic upload.
  */
 import { useEffect, useRef, useState } from "react";
 import { deleteMedia, downloadMediaBlob, listMedia, uploadMedia } from "../services/mediaService";
@@ -24,7 +32,7 @@ import { getErrorMessage } from "../utilities/apiError";
 import { ConfirmationDialog } from "./ConfirmationDialog";
 import { ErrorMessage } from "./ErrorMessage";
 
-export function MediaAttachments({ entityType, entityId, editable }) {
+export function MediaAttachments({ entityType, entityId, editable, onUpload }) {
   const [items, setItems] = useState([]);
   const [previews, setPreviews] = useState({});
   const [loading, setLoading] = useState(true);
@@ -72,7 +80,8 @@ export function MediaAttachments({ entityType, entityId, editable }) {
 
     setUploading(true);
     setError(null);
-    uploadMedia({ entityType, entityId, file })
+    const upload = onUpload ? onUpload(file) : uploadMedia({ entityType, entityId, file });
+    upload
       .then(async (created) => {
         setItems((prev) => [...prev, created]);
         const blob = await downloadMediaBlob(created.MediaFileId);

@@ -36,3 +36,13 @@ export const CAN_MANAGE_PROPERTIES = [ADMINISTRATOR, MANAGER];
 // OR `user.UserId === inspection.InspectorUserId`) instead of relying on this constant alone -
 // see pages/inspections/InspectionWizardLayout.jsx.
 export const CAN_CONDUCT_INSPECTIONS = [ADMINISTRATOR, MANAGER, INSPECTOR];
+
+// Maintenance: viewing (list/get/timeline) has no role restriction, same as every module above.
+// General field edits (Title/Description/Category/Priority/DueDate/Notes) and assignment are
+// Administrator/Manager only, route-gated - app/services/maintenance_service.py's own module
+// docstring. Status changes/notes/photos are narrower still (the issue's own AssignedUserId, or
+// Admin/Manager) but that's a PER-RECORD check the same way Inspections' `canEdit` is - not a
+// static role list this constant could express, so pages needing it compute it at runtime from
+// `user.UserId === issue.AssignedUserId` OR CAN_MANAGE_MAINTENANCE, the same pattern
+// InspectionWizardLayout.jsx already established for `canEdit`.
+export const CAN_MANAGE_MAINTENANCE = [ADMINISTRATOR, MANAGER];

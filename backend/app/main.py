@@ -17,6 +17,7 @@ from app.api import (
     properties,
     risk,
     units,
+    users,
     vacant_units,
 )
 from app.core.config import settings
@@ -63,3 +64,4 @@ app.include_router(vacant_units.router, prefix="/api")
 app.include_router(risk.router, prefix="/api")
 app.include_router(meter_readings.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(users.router, prefix="/api")

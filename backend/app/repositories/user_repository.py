@@ -27,3 +27,19 @@ def get_user_by_email(db: Session, email: str) -> User | None:
 def get_user_by_id(db: Session, user_id: int) -> User | None:
     stmt = select(User).options(joinedload(User.roles)).where(User.UserId == user_id)
     return db.execute(stmt).unique().scalar_one_or_none()
+
+
+def list_users_for_company(db: Session, company_id: int, *, include_inactive: bool = False) -> list[User]:
+    """The "admin looks up a user by ID/lists users in their own company" case this file's own
+    module docstring flagged as needing CompanyId scoping, unlike the two lookups above - added
+    for the Maintenance module's "assign to" picker (app/api/users.py), the first caller that
+    needs to enumerate a company's users rather than resolve one specific already-known user."""
+    stmt = (
+        select(User)
+        .options(joinedload(User.roles))
+        .where(User.CompanyId == company_id)
+        .order_by(User.FirstName, User.LastName)
+    )
+    if not include_inactive:
+        stmt = stmt.where(User.IsActive == True)  # noqa: E712 - MSSQL's IS only accepts NULL, see Phase 15's gotcha
+    return list(db.execute(stmt).unique().scalars().all())

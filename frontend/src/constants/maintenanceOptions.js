@@ -24,3 +24,14 @@ export const MAINTENANCE_PRIORITY_OPTIONS = [
   { value: "Urgent", label: "Urgent" },
   { value: "Emergency", label: "Emergency" },
 ];
+
+/** Mirrors app/schemas/enums.py's MaintenanceIssueStatus exactly. Order matches the workflow's
+ * natural progression, not alphabetical - used both for the status SELECT and for the filter. */
+export const MAINTENANCE_STATUS_OPTIONS = [
+  { value: "Open", label: "Open" },
+  { value: "Assigned", label: "Assigned" },
+  { value: "InProgress", label: "In Progress" },
+  { value: "Waiting", label: "Waiting" },
+  { value: "Completed", label: "Completed" },
+  { value: "Closed", label: "Closed" },
+];

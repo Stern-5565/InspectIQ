@@ -1015,11 +1015,74 @@ Current status. Overwrite/update this file at the end of every session or phase 
     validation test itself. No horizontal overflow at 375px. All test data (the inspection and
     its 102 responses) cleaned up from the real DB afterward.
 
+- **Phase 16 continued — the standalone Maintenance module (list/detail/assign/status/notes/
+  photos) complete.** The first of Phase 16's remaining standalone modules - closes the real gap
+  flagged when the wizard finished: records the wizard's quick-create (Sub-phase C) fed in had
+  nowhere to be browsed or managed afterward.
+  - **A small, justified backend addition, found necessary while designing the frontend**:
+    `GET /api/users` (`app/api/users.py`, new) - nothing in the backend could enumerate a
+    company's users before this, and the Assign control needs a picker. View-only, no role
+    restriction (matching every other view endpoint), company-isolated via a new
+    `user_repository.list_users_for_company` (the repository file's own docstring had already
+    flagged that a future "list users in a company" case would need `CompanyId` scoping, unlike
+    its two existing lookups - this is that case). 3 new tests (132 total backend tests), full
+    suite re-run clean.
+  - `pages/maintenance/MaintenanceIssuesListPage.jsx` (filter by status/category/priority/
+    property/assigned-to, mirroring `InspectionsListPage.jsx`'s one-off-fetch pattern for
+    resolving Property names, extended here to also resolve Assigned-to names via the new
+    `listUsers()`), `MaintenanceIssueDetailPage.jsx` (the real center of the module), and
+    `MaintenanceIssueFormPage.jsx` (edit-only, no create mode - see below for why).
+  - **Three authorization tiers rendered as three separately-gated sections, matching
+    `maintenance_service.py`'s own module docstring exactly** rather than one blanket flag:
+    `canManage` (Administrator/Manager, new `CAN_MANAGE_MAINTENANCE` constant) gates the Edit
+    link and the Assign control; `canWork` (the issue's own `AssignedUserId`, OR `canManage` -
+    computed per-record on the Detail page, mirroring `InspectionWizardLayout`'s `canEdit`)
+    gates status changes, notes, and photo uploads; plain view (everything else) has no gating
+    at all. The "New status" select excludes the issue's current status client-side, avoiding a
+    guaranteed 422 the backend would otherwise correctly reject.
+  - **`MediaAttachments.jsx` gained an optional `onUpload` override** - the first real consumer
+    besides the generic path. `maintenance_service.upload_photo` writes a `PhotoUploaded`
+    timeline entry the generic `/api/media` upload knows nothing about, so
+    `MaintenanceIssueDetailPage` passes `onUpload={(file) => uploadMaintenancePhoto(...)}` to
+    route CREATE through the timeline-aware endpoint while list/download/delete still use the
+    generic one (no timeline entry needed for those). Every other `MediaAttachments` caller
+    omits the prop and is unaffected.
+  - **A real bug found and fixed during live verification, not shipped**: the Timeline section
+    only reflected `issue.Updates` from the initial page load - uploading a photo correctly
+    wrote a `PhotoUploaded` row server-side (confirmed via a page reload), but the live page
+    didn't show it until manually refreshed. Fixed with a `refreshTimeline()` re-fetch chained
+    onto the `onUpload` promise - deliberately NOT reusing `loadIssue()` for this, since that
+    function flips `loading` and would unmount the whole detail page (`MediaAttachments`
+    included) mid-upload; `refreshTimeline()` is a quiet re-fetch with no loading gate.
+  - **A second real bug found and fixed**: the Edit form's success toast
+    (`navigate(..., { state: { toast: ... } })`) never appeared, because
+    `MaintenanceIssueDetailPage` never read `location.state?.toast` at all - copy-pasted the
+    `useState(null)` toast pattern without the `location.state` initialization every other page
+    using this exact navigate-with-toast convention (`PropertiesListPage`,
+    `PropertyDetailPage`) already has. Fixed by adding the same `location.state?.toast` read +
+    clear-on-mount effect.
+  - **Deliberately no `/maintenance-issues/new` route** - scope §17 frames issue creation
+    entirely as the wizard's job ("from any inspection question"), not a standalone flow; this
+    module is specifically the other half (browse/manage what the wizard already created), not
+    a duplicate creation path.
+  - `StatusBadge`'s shared tone map gained Maintenance's Status/Priority values (open/assigned/
+    inprogress/waiting/completed/closed, emergency/urgent/high/medium/low) - grown incrementally
+    per the component's own stated design, not a one-off override at each call site.
+  - **Verified live**: created a real issue via the API, then through the actual UI as
+    Administrator - assigned it (Status auto-advanced Open→Assigned exactly per backend logic,
+    confirmed in the Timeline), updated status to InProgress with a comment, added a note,
+    uploaded two photos (Timeline updated live both times after the fix), edited the Title/Due
+    date (toast confirmed after the fix). Confirmed the assigned Maintenance-role worker (not
+    Admin/Manager) sees status/notes/photos controls but neither Edit nor Assign. Confirmed a
+    Viewer sees a fully read-only page (including the two real photos, view has no role
+    restriction). Confirmed cross-company isolation through the real UI (a Bright Spaces admin
+    got "Maintenance issue not found."). No horizontal overflow at 375px on either List or
+    Detail. All test data (the issue, its timeline, both media rows, and both files on disk)
+    cleaned up from the real DB and disk afterward.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Inspection engine Sub-phase F) to git is the next
-  action. **The entire Inspection Engine Wizard (Prompt 17, all six sub-phases) is now done** -
-  see "Next tasks" for what's left in Phase 16 overall (the ~19-page list minus what's built).
+- Nothing in progress. Committing this batch (the Maintenance module) to git is the next action.
 
 ## Important decisions
 
@@ -1182,18 +1245,25 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 3. **Phase 16 itself is NOT yet done** - its own exit criteria (`PROJECT_PLAN.md §11`: "All
    pages navigable, auth-gated correctly") means every module needs its OWN standalone list/
    detail pages too, the same way Properties got `PropertiesListPage`/`PropertyDetailPage`/
-   `PropertyFormPage`. The wizard's quick-create modals (Sub-phases C/D/E) let an inspector
-   CREATE a MaintenanceIssue/RiskAssessment/MeterReading/VacantUnitInspection/CleaningInspection
-   from inside an inspection, but there is still no page anywhere in the app to browse, filter,
-   or manage those records afterward - e.g. no way to see "all open maintenance issues across
-   the company," assign one, or change its status, the way the backend's own
-   `PATCH /{id}/assign`/`PATCH /{id}/status` endpoints already support. Remaining pages, per
-   Prompt 16's own list and Phase 16's intro entry above: Maintenance (list/detail, assign,
-   status/timeline), Risk Register (list/detail, matrix config UI), Cleaning (areas config,
-   grading history), Vacant Units (list/detail), Meter Readings (list/detail), Admin Settings.
-   No sub-phase order has been decided for these yet - that's an open decision for a future
-   session, not something 2026-08-25's planning session covered (it only approved the wizard's
-   own six sub-phases).
+   `PropertyFormPage`.
+   - **Maintenance — DONE** (commit pending as of this writing) - list/detail/assign/status/
+     notes/photos, plus a small justified `GET /api/users` backend addition for the Assign
+     picker. See the "What has been completed" entry above for the full detail, including two
+     real bugs found and fixed during live verification (a stale Timeline after photo upload,
+     and a missing Edit-success toast).
+   - **Remaining, per Prompt 16's own page list**: Risk Register (list/detail, matrix config
+     UI), Cleaning (areas config, grading history), Vacant Units (list/detail), Meter Readings
+     (list/detail), Admin Settings. The wizard's quick-create modals (Sub-phases C/D/E) let an
+     inspector CREATE a RiskAssessment/MeterReading/VacantUnitInspection/CleaningInspection from
+     inside an inspection, the same gap Maintenance had - there's still no page anywhere in the
+     app to browse, filter, or manage those records afterward. No order has been decided for
+     these yet - an open decision for a future session, not something 2026-08-25's planning
+     session covered (it only approved the wizard's own six sub-phases).
+   - A pattern worth reusing across all of these, confirmed twice now (Maintenance's `GET /api/
+     users`, Sub-phase D's `inspection_response_id` filter): read the relevant `_service.py`
+     file's authorization logic BEFORE designing each module's frontend gating, and check
+     whether the existing API surface actually supports what a management page needs (a
+     picker, a filter) before assuming it does.
 
 ## Files that require attention
 

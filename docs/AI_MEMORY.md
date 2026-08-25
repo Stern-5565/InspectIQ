@@ -1579,3 +1579,82 @@ pages too (Maintenance, Risk Register, Cleaning, Vacant Units, Meter Readings, A
 which the wizard's quick-create paths only ever fed records INTO, never gave a way to browse or
 manage afterward. No sub-phase order has been chosen for those yet - an open decision for
 whenever that work starts, not something today's planning session covered.
+
+## 2026-08-25 — Maintenance module built: the first of Phase 16's remaining standalone pages, two real bugs found live
+
+Asked what to build next (the wizard being fully done left an open choice among the ~6 remaining
+Phase 16 modules), recommended Maintenance specifically because scope calls it "a major
+standalone module," it already had real records flowing in from the wizard's own quick-create
+(Sub-phase C), and there was genuinely no way to see, assign, or update any of them - the
+backend's `PATCH /{id}/assign`/`PATCH /{id}/status` endpoints existed and worked (proven by
+Phase 10's own tests) but were completely unreachable from the UI. Owner agreed; built list/
+detail/edit (`pages/maintenance/`).
+
+**A real, necessary backend gap found while designing the Assign control, not before**: nothing
+in the entire backend could enumerate a company's users - `user_repository.py`'s two existing
+functions (`get_user_by_email`/`get_user_by_id`) are both single-user lookups for auth, and its
+own module docstring had already flagged, back in Phase 5, that "a future 'admin looks up a user
+by ID in their own company' endpoint... WOULD need CompanyId scoping, don't copy this pattern
+for that case" - that anticipated need finally arrived. Added `list_users_for_company` (properly
+scoped, per that warning) and a new `GET /api/users` (`app/api/users.py`) - view-only, no role
+restriction, matching every other view endpoint's "any company member can see this" shape. 3 new
+tests, full backend suite (132 total) re-run clean before touching the frontend.
+
+**Three authorization tiers, matching `maintenance_service.py`'s own documented shape exactly,
+not a single blanket "can edit" flag** - the same discipline every prior sub-phase this session
+established, now applied to a full CRUD-ish module rather than one quick-create action:
+`canManage` (Administrator/Manager) gates Edit and Assign; `canWork` (the issue's own
+`AssignedUserId`, OR `canManage` - computed per-record, mirroring `InspectionWizardLayout`'s
+`canEdit` exactly) gates status/notes/photos; plain view has no gate. A new
+`CAN_MANAGE_MAINTENANCE` constant covers the first tier; the second is per-record and can't be a
+static role list, the same reasoning `constants/roles.js`'s own `CAN_CONDUCT_INSPECTIONS`
+comment already documented for Inspections.
+
+**`MediaAttachments.jsx`'s first real extension point used for something other than its default
+behavior**: added an optional `onUpload(file)` override, since `maintenance_service.upload_photo`
+writes a `PhotoUploaded` timeline entry the generic `/api/media` upload has no way to know about.
+Every other caller (InspectionResponse photos, Sub-phase B) omits the prop and is unaffected -
+confirmed by rebuilding and re-verifying those still work identically after the change.
+
+**Two real bugs found only by live verification, both fixed before considering the module done**:
+
+1. The Timeline went stale after uploading a photo - the backend correctly wrote the
+   `PhotoUploaded` row (confirmed via a page reload showing it), but the live page kept showing
+   the pre-upload `Updates` array until manually refreshed. The natural-looking fix (`onUpload`
+   calling the same `loadIssue()` used on mount) would have been WRONG - `loadIssue()` flips
+   `loading`, whose early-return would unmount the entire detail page, `MediaAttachments`
+   included, mid-upload. Added a separate `refreshTimeline()` - a quiet re-fetch with no loading
+   gate - chained onto the `onUpload` promise instead. Confirmed working: uploaded a second
+   photo, the Timeline's new "uploaded a photo" entry appeared immediately, no reload needed.
+
+2. The Edit form's success toast never appeared. `MaintenanceIssueFormPage` correctly navigated
+   back with `state: { toast: "..." }` (the same convention `PropertyFormPage`/
+   `PropertiesListPage` already use), but `MaintenanceIssueDetailPage`'s own toast state was
+   plain `useState(null)` - the `location.state?.toast` initialization + clear-on-mount effect
+   every other page using this exact pattern already has had been left out. A straightforward
+   omission, not a design problem - fixed by copying the established pattern in full this time,
+   confirmed live (the toast now shows after a real edit).
+
+**Verified live, end to end, as four different users in sequence** (Administrator, a
+cross-company Administrator, the assigned Maintenance-role worker, a Viewer) against one real
+issue created via the API: assigned it as Administrator (Status auto-advanced Open→Assigned,
+confirmed in the Timeline, matching Phase 10's own documented auto-advance rule), updated status
+to InProgress with a comment, added a note, uploaded two photos (Timeline updated live both
+times, post-fix), edited the Title and Due date (toast confirmed, post-fix). The assigned
+Maintenance worker (not Admin/Manager) saw status/notes/photos controls but neither Edit nor
+Assign - `canWork` without `canManage`, the one tier combination not otherwise exercised by the
+Administrator pass. A cross-company Administrator got a real "Maintenance issue not found." on
+the same URL. A Viewer saw a fully read-only page, including both real photos (view has no role
+restriction). No horizontal overflow at 375px on either List or Detail. All test data (the
+issue, its full timeline, both media rows, and both files on disk) cleaned up afterward - the
+cleanup order needed `MediaFiles` deleted before `MaintenanceUpdates`/`MaintenanceIssue`, no FK
+surprise this time since the media rows don't reference the issue back the way `MeterReadings.
+PhotoMediaFileId` did in Sub-phase D.
+
+**A pattern worth carrying into the next remaining module (Risk Register/Cleaning/Vacant Units/
+Meter Readings/Admin Settings), confirmed twice now this session** (this module's `GET /api/
+users`, Sub-phase D's `inspection_response_id` filter): read the relevant `_service.py` file's
+authorization logic AND check whether the existing API surface actually supports what a new
+management page needs (a lookup, a filter, a picker) BEFORE designing that page's frontend - both
+times this session, the answer was "not quite," and the gap was small and worth closing properly
+rather than working around client-side.

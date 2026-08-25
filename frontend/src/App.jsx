@@ -30,6 +30,14 @@
  * check (`ensure_can_edit` on the backend) that `allowedRoles` can't express, so
  * `InspectionWizardLayout` computes `canEdit` itself and the question/sections/review pages read
  * it from `useOutletContext()` rather than a route-level gate.
+ *
+ * Maintenance: view (list/detail) has no role restriction, the same shape as every module above.
+ * Only `/maintenance-issues/:id/edit` (general field edits) is route-gated to
+ * `CAN_MANAGE_MAINTENANCE` - assign/status/notes/photos are all per-record checks
+ * (`ensure_can_edit`-shaped, mirroring the same reasoning as Inspections' `canEdit`) that
+ * `MaintenanceIssueDetailPage` computes itself, the same pattern as `InspectionWizardLayout`. No
+ * `/maintenance-issues/new` route exists - scope §17 frames issue creation entirely as the
+ * wizard's job (Sub-phase C's quick-create), not a standalone flow this module adds.
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -51,7 +59,10 @@ import { InspectionWizardLayout } from "./pages/inspections/InspectionWizardLayo
 import { InspectionSectionsPage } from "./pages/inspections/InspectionSectionsPage";
 import { InspectionQuestionPage } from "./pages/inspections/InspectionQuestionPage";
 import { InspectionReviewPage } from "./pages/inspections/InspectionReviewPage";
-import { CAN_MANAGE_PROPERTIES, CAN_CONDUCT_INSPECTIONS } from "./constants/roles";
+import { MaintenanceIssuesListPage } from "./pages/maintenance/MaintenanceIssuesListPage";
+import { MaintenanceIssueDetailPage } from "./pages/maintenance/MaintenanceIssueDetailPage";
+import { MaintenanceIssueFormPage } from "./pages/maintenance/MaintenanceIssueFormPage";
+import { CAN_MANAGE_PROPERTIES, CAN_CONDUCT_INSPECTIONS, CAN_MANAGE_MAINTENANCE } from "./constants/roles";
 
 export function App() {
   return (
@@ -87,6 +98,13 @@ export function App() {
                   <Route index element={<InspectionSectionsPage />} />
                   <Route path="sections/:sectionIndex/questions/:questionIndex" element={<InspectionQuestionPage />} />
                   <Route path="review" element={<InspectionReviewPage />} />
+                </Route>
+
+                <Route path="/maintenance-issues" element={<MaintenanceIssuesListPage />} />
+                <Route path="/maintenance-issues/:id" element={<MaintenanceIssueDetailPage />} />
+
+                <Route element={<ProtectedRoute allowedRoles={CAN_MANAGE_MAINTENANCE} />}>
+                  <Route path="/maintenance-issues/:id/edit" element={<MaintenanceIssueFormPage />} />
                 </Route>
               </Route>
             </Route>

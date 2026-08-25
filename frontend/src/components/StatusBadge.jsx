@@ -21,6 +21,18 @@ const TONE_BY_STATUS = {
   unknown: "neutral",
   inactive: "danger",
   other: "neutral",
+  // Maintenance status/priority
+  open: "warning",
+  assigned: "info",
+  inprogress: "info",
+  waiting: "warning",
+  completed: "success",
+  closed: "neutral",
+  emergency: "danger",
+  urgent: "danger",
+  high: "warning",
+  medium: "info",
+  low: "neutral",
 };
 
 export function StatusBadge({ status, tone }) {
