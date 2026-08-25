@@ -763,6 +763,92 @@ h3 {
   color: inherit;
 }
 
+/* --- Plain checkbox field (e.g. "Include inactive") --- */
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: 0.9rem;
+  font-weight: 400;
+  margin-bottom: var(--spacing-3);
+}
+
+/* --- Inspection Templates detail --- */
+
+.template-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+}
+
+.template-section summary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.template-section__count {
+  color: var(--color-text-muted);
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.template-question-list {
+  list-style: none;
+  margin: var(--spacing-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.template-question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) 0;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.template-question--inactive {
+  opacity: 0.6;
+}
+
+.template-question__text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+}
+
+.template-question__answer-type {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.template-question__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.template-question__flag {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 1px var(--spacing-2);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
 /* --- Desktop (also works at wider viewport) --- */
 
 @media (min-width: 768px) {

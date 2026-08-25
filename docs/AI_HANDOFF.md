@@ -689,11 +689,39 @@ Current status. Overwrite/update this file at the end of every session or phase 
     `CleaningAreas` from Phase 11 - the first hard-delete cleanup this session hit that FK, since
     Properties has no soft-delete-only trigger the way `InspectionTemplates`/Sections/Questions
     do) → both servers stopped cleanly.
+- **Phase 16 continued — Inspection Templates frontend module.** Read-only end to end, matching
+  the backend's own scope (`app/api/inspection_templates.py`'s module docstring: template
+  authoring is "eventually," not this phase) - no create/edit/delete anywhere, no
+  `CAN_MANAGE_INSPECTION_TEMPLATES` constant, and neither route nested under a role-narrowing
+  `ProtectedRoute` at all.
+  - `services/inspectionTemplateService.js` wraps `/api/inspection-templates` - a plain list,
+    not `PaginatedResponse`, since the backend itself returns one (small realistic count per
+    company).
+  - `pages/inspection-templates/InspectionTemplatesListPage.jsx` - name/description/version/
+    scope (global default vs. company-specific, from `CompanyId === null`)/status, with an
+    "include inactive" checkbox (no search/filter beyond that - unlike Properties' larger
+    portfolio, this list is small).
+  - `pages/inspection-templates/InspectionTemplateDetailPage.jsx` - the full nested
+    Sections→Questions tree in one request, rendered as native `<details>`/`<summary>` per
+    section rather than custom collapse state - the default template alone is 21 sections/102
+    questions, so something has to collapse, and `<details>` gets that free, accessibly, with no
+    extra JS. Each question shows its `AnswerType` (YesNo/PassFail/Condition/Text/Number/Date/
+    MeterReading - `database/constraints/09_Constraints.sql`'s own CHECK list) and its boolean
+    flags (Mandatory/Notes/Photo/Photo required/Can raise maintenance/Can raise risk) as small
+    pills - the same "good enough at a glance" spirit as `StatusBadge`, not a form (nothing here
+    is editable).
+  - **Verified live, through the real running UI**: real Administrator login → the seeded
+    "Monthly Property Inspection" template listed correctly as "Global default"/"Active" →
+    detail page showed the correct totals (21 sections, 102 questions) → expanded the
+    "Electricity Meter" section and confirmed all 3 real questions rendered with correct answer
+    types (`METERREADING`/`YESNO`/`CONDITION`) and flags, matching the actual seeded data exactly
+    → confirmed every `/api/inspection-templates*` network call returned a real 200 → confirmed
+    no page-level horizontal overflow at 375px mobile width.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Properties + Units frontend module) to git is the
-  next action.
+- Nothing in progress. Committing this batch (Inspection Templates frontend module) to git is
+  the next action.
 
 ## Important decisions
 
@@ -808,26 +836,25 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Properties + Units frontend module) to git.
-2. **Phase 16 continues — Inspection Templates next** (read-only list + detail, mirroring the
-   backend's own Phase 7 scope), then the Inspection engine itself (Prompt 17's "most important
-   screen in the application" - a bespoke wizard flow per `PROJECT_PLAN.md §6`/§7, NOT the
-   List/Detail/Form triad Properties used - worth reading `prompts/frontend_prompt.md` in full
-   and planning deliberately before starting it, not treating it as just another module). After
-   that: Maintenance, Risk, Cleaning, Vacant Units, Meter Readings, Admin Settings - same
-   incremental order the backend itself followed. Each CRUD-shaped module's frontend now has a
-   proven template to follow: `services/xService.js`, `constants/roles.js` additions
-   (`CAN_MANAGE_X`, and `CAN_VIEW_X` only where the backend actually restricts viewing - most
-   modules don't), List/Detail/Form pages built from the shared component library in
-   `components/` (now real and reusable, not per-module scaffolding), and a new nested
-   `<Route>`/`<ProtectedRoute allowedRoles={...}>` block in `App.jsx` plus a `Sidebar` link -
-   same pattern `App.jsx`'s own module docstring describes.
+1. Commit this batch (Inspection Templates frontend module) to git.
+2. **Phase 16 continues — the Inspection engine next** (Prompt 17's "most important screen in
+   the application" - a bespoke mobile wizard flow per `PROJECT_PLAN.md §6`/§7, NOT the
+   List/Detail/Form triad every module so far has used - worth reading `prompts/frontend_prompt.md`
+   in full and planning deliberately before starting it, not treating it as just another module).
+   It's the natural next module: Properties + Units + Inspection Templates are exactly the three
+   things starting an inspection needs to already exist and be navigable. After that: Maintenance,
+   Risk, Cleaning, Vacant Units, Meter Readings, Admin Settings - same incremental order the
+   backend itself followed, each with a proven List/Detail/Form template to follow now
+   (`services/xService.js`, `constants/roles.js` additions - `CAN_MANAGE_X`, and `CAN_VIEW_X`
+   only where the backend actually restricts viewing, which most modules don't - List/Detail/Form
+   pages built from the shared component library in `components/`, and a new nested
+   `<Route>`/`<ProtectedRoute allowedRoles={...}>` block in `App.jsx` plus a `Sidebar` link).
    - No further "pause for owner review" checkpoint is needed before continuing within Phase 16
      itself - the owner already reviewed and approved starting Phase 16 (scaffold + auth), the
-     stack/architecture/shared-component choices are made and proven working end-to-end
-     (Properties + Units exercised the full CRUD template live), and the remaining work is
-     incremental module-by-module frontend building against an already-complete, already-tested
-     backend, not a new undertaking requiring fresh sign-off.
+     stack/architecture/shared-component choices are made and proven working end-to-end across
+     two full modules now, and the remaining work is incremental module-by-module frontend
+     building against an already-complete, already-tested backend, not a new undertaking
+     requiring fresh sign-off.
 
 ## Files that require attention
 

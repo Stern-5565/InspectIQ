@@ -8,15 +8,18 @@
  *   header shell once, around whichever page is active (see layouts/MainLayout.jsx).
  * - "*" catches any URL that doesn't match one of the routes above.
  *
- * Dashboard + Properties/Units exist as real pages so far - this file grows one nested <Route>
- * block per module as each module's frontend gets built (same incremental order as the
- * backend), the same shape PropertyManager's App.jsx used across its own modules. Dashboard
- * needs no `allowedRoles` (constants/roles.js - GET /api/dashboard has no role gate at all), so
- * it's the one route NOT wrapped in a second, role-narrowing ProtectedRoute. Properties' VIEW
- * routes are the same way (no CAN_VIEW_PROPERTIES exists - any company member can view); only
- * the create/edit routes are nested under a second ProtectedRoute with
- * `allowedRoles={CAN_MANAGE_PROPERTIES}`. Units have no routes of their own - they're managed
- * entirely from within PropertyDetailPage (see that file's own header comment for why).
+ * Dashboard + Properties/Units + Inspection Templates exist as real pages so far - this file
+ * grows one nested <Route> block per module as each module's frontend gets built (same
+ * incremental order as the backend), the same shape PropertyManager's App.jsx used across its
+ * own modules. Dashboard needs no `allowedRoles` (constants/roles.js - GET /api/dashboard has
+ * no role gate at all), so it's the one route NOT wrapped in a second, role-narrowing
+ * ProtectedRoute. Properties' VIEW routes are the same way (no CAN_VIEW_PROPERTIES exists - any
+ * company member can view); only the create/edit routes are nested under a second
+ * ProtectedRoute with `allowedRoles={CAN_MANAGE_PROPERTIES}`. Units have no routes of their own
+ * - they're managed entirely from within PropertyDetailPage (see that file's own header comment
+ * for why). Inspection Templates are read-only end to end (no mutation exists in the backend
+ * yet - app/api/inspection_templates.py's own module docstring), so neither of its two routes
+ * is nested under a role-narrowing ProtectedRoute at all.
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -30,6 +33,8 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { PropertiesListPage } from "./pages/properties/PropertiesListPage";
 import { PropertyDetailPage } from "./pages/properties/PropertyDetailPage";
 import { PropertyFormPage } from "./pages/properties/PropertyFormPage";
+import { InspectionTemplatesListPage } from "./pages/inspection-templates/InspectionTemplatesListPage";
+import { InspectionTemplateDetailPage } from "./pages/inspection-templates/InspectionTemplateDetailPage";
 import { CAN_MANAGE_PROPERTIES } from "./constants/roles";
 
 export function App() {
@@ -52,6 +57,9 @@ export function App() {
                   <Route path="/properties/new" element={<PropertyFormPage />} />
                   <Route path="/properties/:id/edit" element={<PropertyFormPage />} />
                 </Route>
+
+                <Route path="/inspection-templates" element={<InspectionTemplatesListPage />} />
+                <Route path="/inspection-templates/:id" element={<InspectionTemplateDetailPage />} />
               </Route>
             </Route>
 

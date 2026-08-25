@@ -1120,3 +1120,41 @@ deleting the `CleaningAreas` rows before the property, same FK-ordering discipli
 phase's own test cleanup already uses (e.g. MeterReadings→MediaFiles from the Phase 14 entry) -
 confirmed the failed first attempt rolled back atomically (nothing was left half-deleted) before
 retrying with the corrected order.
+
+## 2026-08-25 — Inspection Templates frontend module (Phase 16 continued)
+
+Read-only end to end, matching the backend's own scope exactly (`app/api/inspection_templates.py`'s
+module docstring: template authoring is "eventually," Phase 8's inspection engine is what
+actually needs these two endpoints to exist). No `CAN_MANAGE_INSPECTION_TEMPLATES` constant, no
+form page, neither route nested under a role-narrowing `ProtectedRoute` - the simplest module
+shape yet, correctly kept that simple rather than adding CRUD scaffolding nothing asked for.
+
+The list page shows scope as "Global default" vs. "Company-specific" derived from
+`CompanyId === null` - the exact same nullable-`CompanyId` signal the backend's own repository
+uses for the "global default + per-company override" pattern (`docs/AI_MEMORY.md`'s Phase 7
+entry), read directly off the response rather than the frontend inventing its own notion of
+what makes a template "global."
+
+**The detail page's real design decision**: 21 sections and 102 questions for the one seeded
+template is a lot to render flat, but this is read-only reference data, not a workflow needing
+custom interaction - native `<details>`/`<summary>` per section gets free, accessible collapse/
+expand with zero JS state, correctly judged as the right tool here specifically because nothing
+on this page needs to be more interactive than "let me collapse what I'm not looking at." (The
+actual Inspection engine wizard, Prompt 17, is exactly the case where that judgment would flip -
+noted for when that page gets built.)
+
+**Verified live, through the real running UI**, not just assumed from reading the schema: real
+Administrator login → the real "Monthly Property Inspection" template listed correctly → detail
+page's own computed totals (21 sections, 102 questions, summed client-side from the nested
+response) matched → expanded one real section (Electricity Meter) and confirmed all 3 of its
+actual questions rendered with the correct `AnswerType` values (`METERREADING`/`YESNO`/
+`CONDITION` - matching `09_Constraints.sql`'s CHECK list exactly, not a guessed enum) and the
+correct boolean flags per question → every `/api/inspection-templates*` request in the network
+log came back a real 200 → confirmed no horizontal overflow at 375px mobile width.
+
+A frontend dev server left running from a prior session (started for the owner to log in and
+explore locally) was still up on port 5173 outside the preview tool's own process tracking -
+`preview_start` correctly refused to reuse it as a managed dev server (port already held by a
+process it doesn't own), so verification connected to it directly via `preview_start` with a
+plain `url`, the same way any already-running external server is used, rather than restarting
+anything the owner might still have been using.
