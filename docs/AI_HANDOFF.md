@@ -869,11 +869,57 @@ Current status. Overwrite/update this file at the end of every session or phase 
     for that role even though the underlying authorization rule is different. All test data
     (inspection, 102 responses, the issue, the risk assessment) cleaned up afterward.
 
+- **Phase 16 continued — Inspection engine wizard, Sub-phase D (MeterReading answer type: photo
+  → mock OCR → confirm/correct) complete.** Wired to `/api/meter-readings`, not the generic
+  `PATCH .../responses/{id}` endpoint every other answer type uses - a meter reading is its own
+  record (`AIDetectedReading`/`ConfirmedReading`/`PhotoMediaFileId`), not free text on the
+  response.
+  - **A small, deliberate backend addition, not scope creep**: `GET /api/meter-readings` gained
+    an `inspection_response_id` filter (`app/api/meter_readings.py`, `meter_reading_service.py`,
+    `meter_reading_repository.py`) - the Question screen needs to know whether a reading already
+    exists for THIS response, and `InspectionResponseSchema` carries no pointer back to a
+    `MeterReadingId` (the ERD only points the other way). One new backend test
+    (`test_list_filtered_by_inspection_response_id`, 130 total), full suite re-run clean.
+  - `services/meterReadingService.js` (list/create/update) and `components/
+    MeterReadingControl.jsx` - the actual state machine: no reading yet → capture form (meter
+    type, defaulted from the question's own section name via a small heuristic - "Electricity
+    Meter" section guesses `Electricity` - plus optional serial number, then a photo); reading
+    exists, unconfirmed → shows the photo + AI value, with a Confirm form pre-filled from
+    `AIDetectedReading`; confirmed → shows the confirmed value with a "Correct this reading"
+    reopen. The photo is always visible regardless of role (view has no restriction, same as
+    every other module) - only the CREATE and CONFIRM actions are gated.
+  - **A third distinct authorization shape inside one control, confirmed by reading
+    `meter_reading_service.py` before wiring either half** (same lesson as Sub-phase C's two
+    modals): CREATE uses `canRaiseIssues` (`create_meter_reading` has no `ensure_can_edit`-style
+    check at all - any Administrator/Manager/Inspector can take the photo); CONFIRM uses
+    `editable` (`update_meter_reading` calls `ensure_can_edit_reading`, which for an
+    Inspection-linked reading IS exactly the assigned-inspector-or-Admin/Manager rule). Two
+    different gates on the same record, correctly split at the exact line each backend action
+    actually checks.
+  - **Closes a real, previously-open gap**: confirming a reading now also calls the existing
+    generic `PATCH .../responses/{id}` with `AnswerNumber` (the backend auto-derives
+    `AnswerText = str(AnswerNumber)`, same as the Number answer type - no new backend code
+    needed) - before this, a MeterReading question could never count towards
+    `CompletionPercentage` at all, since `_is_answered` only checks `AnswerText`. Deliberately
+    wired at CONFIRM time only, not at photo-upload time - an unconfirmed AI value isn't "the
+    answer" yet, mirroring Phase 14's "the AI value must never silently become the confirmed
+    one."
+  - **Verified live**: started a real inspection, navigated to the seeded "Electricity Meter"
+    section - the meter-type guess correctly pre-selected `Electricity`. Uploaded a real photo →
+    got back the mock OCR's own example value (`AIDetectedReading=18294.6000`,
+    `AIConfidence=0.87`, matching scope §11 exactly) → badge stayed "Unanswered" (correct, not
+    yet confirmed) → confirmed a corrected value (`18300.5`) → badge flipped to "Answered" → the
+    Sections screen's completion count moved to `1/102` (and `Electricity Meter 1/3`) → confirmed
+    via direct DB query that `InspectionResponses.AnswerText`/`AnswerNumber` were both correctly
+    synced. Confirmed a Viewer sees the photo and both values but neither the create button nor
+    "Correct this reading". No mobile overflow at 375px. All test data (inspection, 102
+    responses, the meter reading, its media row and file) cleaned up afterward.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Inspection engine Sub-phase C) to git is the next
-  action, before starting Sub-phase D (the MeterReading answer type's photo → mock OCR → confirm
-  flow).
+- Nothing in progress. Committing this batch (Inspection engine Sub-phase D) to git is the next
+  action, before starting Sub-phase E (the two global "gateway" quick-actions: Add Empty Unit /
+  Grade Cleaning Area).
 
 ## Important decisions
 
@@ -988,11 +1034,11 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Inspection engine Sub-phase C) to git.
-2. **Phase 16 continues — the Inspection engine wizard, Sub-phase D next.** Prompt 17's "most
+1. Commit this batch (Inspection engine Sub-phase D) to git.
+2. **Phase 16 continues — the Inspection engine wizard, Sub-phase E next.** Prompt 17's "most
    important screen in the application," planned in detail with the owner on 2026-08-25 (see
    `docs/AI_MEMORY.md`'s entries of that date for the full design discussion, including the
-   "gateway sections" discovery that shaped this, and Sub-phases A/B/C's own live-verification
+   "gateway sections" discovery that shaped this, and Sub-phases A/B/C/D's own live-verification
    findings). Deliberately staged into sub-phases rather than built as one page, each
    independently committable and verifiable:
    - **Sub-phase A — DONE**, commit `fa3006e` - the core wizard: Inspection List, Start
@@ -1006,14 +1052,19 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
      `components/MediaAttachments.jsx` against `EntityType=InspectionResponse`. A real CSP bug
      (blob: URLs blocked for thumbnails) was found and fixed - see the "What has been completed"
      entry above and `docs/AI_MEMORY.md`'s 2026-08-25 entry for the full story.
-   - **Sub-phase C — DONE** (commit pending as of this writing) - Create Maintenance Issue /
-     Create Risk quick-create modals, gated on a NEW `canRaiseIssues` check (deliberately not
-     `editable` - a real authorization distinction from Photo/Video, see the "What has been
-     completed" entry above). Minimal fields; `InspectionResponseId` supplied so the backend
-     derives Property/Location itself, same as every other creation path into those two modules.
-   - **Sub-phase D (next)** — the `MeterReading` answer type's own flow (photo → mock OCR →
-     confirm/correct, wired to `/api/meter-readings`, not the generic response-update endpoint).
-   - **Sub-phase E** — the two global "gateway" quick-actions confirmed necessary by the seed
+   - **Sub-phase C — DONE**, commit `779a0b6` - Create Maintenance Issue / Create Risk
+     quick-create modals, gated on a NEW `canRaiseIssues` check (deliberately not `editable` - a
+     real authorization distinction from Photo/Video, see the "What has been completed" entry
+     above). Minimal fields; `InspectionResponseId` supplied so the backend derives Property/
+     Location itself, same as every other creation path into those two modules.
+   - **Sub-phase D — DONE** (commit pending as of this writing) - the `MeterReading` answer
+     type's own flow (photo → mock OCR → confirm/correct, wired to `/api/meter-readings`, not
+     the generic response-update endpoint - though confirming DOES also call the generic
+     endpoint once, to sync `AnswerNumber` for `CompletionPercentage`). A small, justified
+     backend addition (`inspection_response_id` filter on `GET /api/meter-readings`) and a third
+     distinct authorization shape (create vs. confirm) were both found by reading the service
+     code first - see the "What has been completed" entry above.
+   - **Sub-phase E (next)** — the two global "gateway" quick-actions confirmed necessary by the seed
      data's own design comment (`database/seed/12_SeedInspectionTemplate.sql`'s file header):
      "Add Empty Unit" (`POST /api/inspections/{id}/vacant-unit-inspections` family) and "Grade
      Cleaning Area" (`POST /api/inspections/{id}/cleaning`) - available throughout the

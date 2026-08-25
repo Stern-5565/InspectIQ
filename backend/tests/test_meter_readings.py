@@ -346,3 +346,47 @@ def test_list_meter_readings(
         assert meter_reading_id in [r["MeterReadingId"] for r in response.json()["items"]]
     finally:
         _delete_reading(db_session, meter_reading_id)
+
+
+def test_list_filtered_by_inspection_response_id(
+    client: TestClient,
+    db_session: Session,
+    northgate_inspector,
+    northgate_property_id: int,
+    template_id: int,
+) -> None:
+    """Sub-phase D's own need (app/api/meter_readings.py's module docstring): the wizard's
+    Question screen must be able to ask "does a reading already exist for THIS response" without
+    fetching every reading at the property."""
+    headers = auth_headers(client, northgate_inspector.Email)
+    start = client.post(
+        "/api/inspections",
+        json={"PropertyId": northgate_property_id, "InspectionTemplateId": template_id},
+        headers=headers,
+    )
+    inspection_id = start.json()["InspectionId"]
+    responses = start.json()["Sections"][0]["Responses"]
+    linked_response_id = responses[0]["InspectionResponseId"]
+    other_response_id = responses[1]["InspectionResponseId"]
+
+    try:
+        create = _create(client, headers, northgate_property_id, inspection_response_id=linked_response_id)
+        meter_reading_id = create.json()["MeterReadingId"]
+
+        matched = client.get(
+            "/api/meter-readings", params={"inspection_response_id": linked_response_id}, headers=headers
+        )
+        assert matched.status_code == 200
+        assert [r["MeterReadingId"] for r in matched.json()["items"]] == [meter_reading_id]
+
+        unmatched = client.get(
+            "/api/meter-readings", params={"inspection_response_id": other_response_id}, headers=headers
+        )
+        assert unmatched.status_code == 200
+        assert unmatched.json()["items"] == []
+
+        _delete_reading(db_session, meter_reading_id)
+    finally:
+        db_session.query(InspectionResponse).filter(InspectionResponse.InspectionId == inspection_id).delete()
+        db_session.query(Inspection).filter(Inspection.InspectionId == inspection_id).delete()
+        db_session.commit()

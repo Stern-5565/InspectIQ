@@ -992,6 +992,29 @@ h3 {
   margin-bottom: var(--spacing-4);
 }
 
+/* --- MeterReadingControl (Sub-phase D) --- */
+
+.meter-reading__create,
+.meter-reading__record {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-4);
+}
+
+.meter-reading__photo {
+  max-width: 220px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+}
+
+.meter-reading__confirm-form {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--spacing-3);
+}
+
 /* --- Question card quick-actions (Create Maintenance Issue / Create Risk, Sub-phase C) --- */
 
 .question-card__quick-actions {

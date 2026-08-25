@@ -1379,3 +1379,68 @@ the remainder of this session's verification once this was noticed, and confirme
 change after clicking" result should be checked with a coordinate-independent method before
 concluding the underlying app feature is broken - it wasn't, twice, before this was diagnosed
 correctly.
+
+## 2026-08-25 — Inspection engine Sub-phase D built: MeterReading's photo → mock OCR → confirm flow, a third authorization shape found in one control
+
+The `MeterReading` answer type's own flow (scope §11), wired to `/api/meter-readings` - the last
+of the five deferred answer-type placeholders from Sub-phase A. `services/
+meterReadingService.js` (list/create/update) and `components/MeterReadingControl.jsx`, a real
+state machine (no reading yet → capture form; unconfirmed → AI value + Confirm form; confirmed →
+value + "Correct this reading" reopen), not three separate always-visible sections.
+
+**A small, deliberate backend addition, found necessary while designing the frontend, not
+scope creep**: the Question screen needs to know whether a `MeterReading` already exists for
+THIS specific `InspectionResponseId` (to decide which of the three states above to render), but
+`GET /api/meter-readings` had no way to filter by it, and `InspectionResponseSchema` carries no
+pointer back to a `MeterReadingId` at all (`docs/DATABASE.md`'s ERD only points the other way).
+Added `inspection_response_id` as an optional query param, threaded through
+`app/api/meter_readings.py` → `meter_reading_service.list_meter_readings` →
+`meter_reading_repository.list_meter_readings` (one more `.where()` clause). One new backend
+test (`test_list_filtered_by_inspection_response_id`, mirroring `test_create_linked_to_
+inspection_response`'s fixture setup), full suite re-run (130 tests) clean before touching the
+frontend. Same shape as the `PATCH /api/inspections/{id}` addition during Sub-phase A's own
+planning - a real frontend need surfacing a genuine, narrowly-scoped backend gap mid-Sub-phase,
+not a sign of poor upfront planning.
+
+**A THIRD distinct authorization shape inside a single control, confirmed by reading
+`meter_reading_service.py` line by line before wiring either half** (the same discipline Sub-
+phase C's two modals used, now proven out a second time on a harder case): CREATE (taking and
+uploading the photo) uses `canRaiseIssues` - `create_meter_reading` has no `ensure_can_edit`-
+style check at all, so any Administrator/Manager/Inspector can do it. CONFIRM (accepting or
+correcting the AI value) uses `editable` - `update_meter_reading` calls
+`ensure_can_edit_reading`, which for an Inspection-linked reading is exactly the same
+assigned-inspector-or-Admin/Manager rule Photo/Video uses. Both gates live in the same
+component, on the same record, and genuinely differ - `MeterReadingControl.jsx` takes both
+`canCreate` and `canConfirm` as separate props rather than collapsing them into one, and its own
+header comment documents which backend function each maps to. **Standing lesson, now confirmed
+three times this session** (Sub-phase C's two modals, this): never assume a new create-adjacent
+action shares its authorization boundary with the answer-editing action already on the same
+page, even when they visually sit right next to each other - read the specific service function.
+
+**Closed a real, previously-open gap, not something scope explicitly asked for but a clear
+consequence of the existing design**: before this Sub-phase, a `MeterReading` question could
+never contribute to `CompletionPercentage` at all - `_is_answered` (Phase 8) only checks
+`AnswerText`, and nothing ever set it for this answer type. Confirming a reading now ALSO calls
+the existing generic `PATCH .../responses/{id}` with `AnswerNumber` - `_normalize_answer`
+(Phase 8) already auto-derives `AnswerText = str(AnswerNumber)` for exactly this situation (the
+same mechanism the plain `Number` answer type already relies on), so no backend change was
+needed, only the frontend wiring the two calls together (`onConfirmed` → the parent's existing
+`save()`). Deliberately wired at CONFIRM time only, not at photo-upload/create time - an
+unconfirmed AI-detected value isn't "the answer" yet, the UI-level extension of Phase 14's own
+principle that the AI value must never silently become the confirmed one.
+
+**Verified live, end to end, against a real inspection navigated to the seeded "Electricity
+Meter" section**: the section-name-based MeterType guess correctly pre-selected `Electricity`
+with no manual selection needed. Uploaded a real photo → the mock OCR returned its own fixed
+example value (`AIDetectedReading=18294.6000`, `AIConfidence=0.87`, matching scope §11's text
+exactly) → the question's badge correctly stayed "Unanswered" (not yet confirmed) → confirmed a
+DELIBERATELY DIFFERENT corrected value (`18300.5`, not just accepting the AI value verbatim, to
+prove the correction path and not just the happy-path accept) → badge flipped to "Answered" →
+the Sections screen's completion moved to `1/102` overall and `1/3` for Electricity Meter →
+confirmed via a direct DB query that `InspectionResponses.AnswerText`/`AnswerNumber` were both
+correctly synced to `18300.5000`. Confirmed a Viewer sees the photo and both AI/confirmed values
+(view has no role restriction) but neither the initial capture button nor "Correct this
+reading". No horizontal overflow at 375px. All test data (the inspection, its 102 snapshot
+responses, the meter reading, its media row, and the actual file on disk) cleaned up afterward -
+the cleanup order itself surfaced a real (expected) FK: `MeterReadings.PhotoMediaFileId`
+references `MediaFiles`, so the reading row must be deleted before its media row, not after.

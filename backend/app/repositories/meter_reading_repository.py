@@ -35,6 +35,7 @@ def list_meter_readings(
     page_size: int,
     property_id: int | None = None,
     meter_type: str | None = None,
+    inspection_response_id: int | None = None,
 ) -> tuple[list[MeterReading], int]:
     stmt = (
         select(MeterReading)
@@ -45,6 +46,8 @@ def list_meter_readings(
         stmt = stmt.where(MeterReading.PropertyId == property_id)
     if meter_type is not None:
         stmt = stmt.where(MeterReading.MeterType == meter_type)
+    if inspection_response_id is not None:
+        stmt = stmt.where(MeterReading.InspectionResponseId == inspection_response_id)
 
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
 

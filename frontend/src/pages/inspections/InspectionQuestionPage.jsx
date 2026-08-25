@@ -14,9 +14,11 @@
  * is typing into on a phone (see utilities/useDebouncedCallback.js's own comment). Date saves
  * on change (a single discrete pick, no typing to debounce). Condition uses a curated
  * Good/Fair/Poor preset (owner's explicit choice, 2026-08-25) even though the backend leaves
- * the field genuinely freeform - still just plain text once saved. MeterReading gets an honest
- * placeholder, not a fake text input - its real flow (photo -> mock OCR -> confirm) is
- * sub-phase D, wired to a completely different endpoint (/api/meter-readings), not this one.
+ * the field genuinely freeform - still just plain text once saved. MeterReading is wired too
+ * (Sub-phase D, via components/MeterReadingControl.jsx) - its own record
+ * (photo/AIDetectedReading/ConfirmedReading), not free text on this response, so `onSave` is
+ * only called once at CONFIRM time to sync AnswerNumber for CompletionPercentage - see that
+ * component's own header comment for the two-tier authorization story (create vs. confirm).
  */
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
@@ -25,6 +27,7 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { CreateMaintenanceIssueModal } from "../../components/CreateMaintenanceIssueModal";
 import { CreateRiskAssessmentModal } from "../../components/CreateRiskAssessmentModal";
 import { MediaAttachments } from "../../components/MediaAttachments";
+import { MeterReadingControl } from "../../components/MeterReadingControl";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Toast } from "../../components/Toast";
 import { updateResponse } from "../../services/inspectionService";
@@ -44,7 +47,7 @@ function flattenPositions(sections) {
   return positions;
 }
 
-function AnswerControl({ response, editable, onSave, saving }) {
+function AnswerControl({ response, editable, onSave, saving, canRaiseIssues, propertyId, sectionName }) {
   const [textValue, setTextValue] = useState(response.AnswerText ?? "");
   const [numberValue, setNumberValue] = useState(response.AnswerNumber ?? "");
   const [dateValue, setDateValue] = useState(response.AnswerDate ?? "");
@@ -169,16 +172,20 @@ function AnswerControl({ response, editable, onSave, saving }) {
         />
       );
 
-    default:
-      // MeterReading (or any future answer type) - the real photo/OCR/confirm flow is a
-      // separate, later piece of work (sub-phase D), wired to /api/meter-readings, not this
-      // generic response-update endpoint.
+    case "MeterReading":
       return (
-        <p className="empty-state">
-          This question uses the Meter Reading flow - full support is coming in a later update.
-          You can still add notes or mark it Not Applicable below.
-        </p>
+        <MeterReadingControl
+          inspectionResponseId={response.InspectionResponseId}
+          propertyId={propertyId}
+          sectionName={sectionName}
+          canCreate={canRaiseIssues}
+          canConfirm={editable}
+          onConfirmed={(value) => onSave({ AnswerNumber: value })}
+        />
       );
+
+    default:
+      return null;
   }
 }
 
@@ -260,7 +267,15 @@ export function InspectionQuestionPage() {
         {response.IsNotApplicable ? (
           <p className="empty-state">Marked as Not Applicable.</p>
         ) : (
-          <AnswerControl response={response} editable={editable} onSave={save} saving={saving} />
+          <AnswerControl
+            response={response}
+            editable={editable}
+            onSave={save}
+            saving={saving}
+            canRaiseIssues={canRaiseIssues}
+            propertyId={inspection.PropertyId}
+            sectionName={section.SectionName}
+          />
         )}
 
         <label className="checkbox-field">

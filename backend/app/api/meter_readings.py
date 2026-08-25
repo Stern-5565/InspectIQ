@@ -9,6 +9,12 @@ VacantUnit's create tier. View has no role restriction. Update (the inspector's 
 correct step) is open to any authenticated user at the ROUTE level - the real gate is
 meter_reading_service.ensure_can_edit_reading's hybrid tier, which can only be evaluated once the
 specific reading (and whether it's Inspection-linked) is loaded.
+
+list's inspection_response_id filter was added during Phase 16 Sub-phase D, not Phase 14 - the
+MeterReading answer type's Question screen needs to know whether a reading already exists for
+THIS response (to show the confirm/correct UI instead of the initial capture-photo one), and
+InspectionResponseSchema carries no pointer back to a MeterReadingId (docs/DATABASE.md's ERD
+only points the other way, MeterReadings -> InspectionResponses).
 """
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
@@ -56,11 +62,18 @@ def list_meter_readings(
     page_size: int = Query(default=20, ge=1, le=100),
     property_id: int | None = Query(default=None),
     meter_type: str | None = Query(default=None),
+    inspection_response_id: int | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[MeterReadingResponse]:
     items, total = meter_reading_service.list_meter_readings(
-        db, current_user, page=page, page_size=page_size, property_id=property_id, meter_type=meter_type
+        db,
+        current_user,
+        page=page,
+        page_size=page_size,
+        property_id=property_id,
+        meter_type=meter_type,
+        inspection_response_id=inspection_response_id,
     )
     return PaginatedResponse(
         items=[MeterReadingResponse.model_validate(r) for r in items],
