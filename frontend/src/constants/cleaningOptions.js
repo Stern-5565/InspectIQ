@@ -7,3 +7,26 @@ export const CLEANING_GRADE_OPTIONS = [
   { value: "D", label: "D - Poor (significant cleaning required)" },
   { value: "E", label: "E - Critical (unacceptable, urgent action required)" },
 ];
+
+/** Mirrors app/schemas/enums.py's CleaningInspectionStatus exactly. */
+export const CLEANING_INSPECTION_STATUS_OPTIONS = [
+  { value: "Pending", label: "Pending" },
+  { value: "Assigned", label: "Assigned" },
+  { value: "Completed", label: "Completed" },
+];
+
+/** Mirrors app/schemas/enums.py's CleaningAreaType exactly - scope §16's own "Areas could
+ * include" list. */
+export const CLEANING_AREA_TYPE_OPTIONS = [
+  { value: "Entrance", label: "Entrance" },
+  { value: "Hallway", label: "Hallway" },
+  { value: "Staircase", label: "Staircase" },
+  { value: "Landing", label: "Landing" },
+  { value: "CommunalKitchen", label: "Communal Kitchen" },
+  { value: "CommunalBathroom", label: "Communal Bathroom" },
+  { value: "BinArea", label: "Bin Area" },
+  { value: "Garden", label: "Garden" },
+  { value: "LaundryArea", label: "Laundry Area" },
+  { value: "Lift", label: "Lift" },
+  { value: "Other", label: "Other" },
+];

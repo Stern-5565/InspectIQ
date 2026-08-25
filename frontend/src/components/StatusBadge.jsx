@@ -38,6 +38,14 @@ const TONE_BY_STATUS = {
   // any company-specific name that doesn't match)
   critical: "danger",
   actionplanned: "warning",
+  // Cleaning (CleaningInspectionStatus; Grade is a single letter A-E, scope §16's own
+  // Excellent/Good/Needs-Attention/Poor/Critical meanings)
+  pending: "warning",
+  a: "success",
+  b: "success",
+  c: "warning",
+  d: "warning",
+  e: "danger",
 };
 
 export function StatusBadge({ status, tone }) {

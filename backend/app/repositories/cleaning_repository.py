@@ -8,7 +8,7 @@ inspection_response_repository.py's convention exactly: the service layer always
 isolation-checks the parent Inspection first via inspection_service.get_inspection before this
 function is ever called.
 """
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.cleaning_area import CleaningArea
@@ -87,6 +87,47 @@ def list_cleaning_inspections_for_inspection(db: Session, inspection_id: int) ->
         .order_by(CleaningInspection.CleaningInspectionId)
     )
     return list(db.execute(stmt).scalars().all())
+
+
+def list_cleaning_inspections_for_company(
+    db: Session,
+    company_id: int,
+    *,
+    page: int,
+    page_size: int,
+    property_id: int | None = None,
+    grade: str | None = None,
+    status: str | None = None,
+) -> tuple[list, int]:
+    """The standalone Cleaning module's own query - added alongside the module's frontend, not
+    part of Phase 11. Every prior CleaningInspection query was scoped to one already-authorized
+    Inspection (list_cleaning_inspections_for_inspection above); nothing before this queried
+    across a whole company. Joins CleaningArea too (for AreaName) so the summary response doesn't
+    need a second round-trip per row - cheap here since every row already needs the Inspection
+    join for isolation anyway."""
+    stmt = (
+        select(CleaningInspection, Inspection.PropertyId, CleaningArea.AreaName)
+        .join(Inspection, Inspection.InspectionId == CleaningInspection.InspectionId)
+        .join(CleaningArea, CleaningArea.CleaningAreaId == CleaningInspection.CleaningAreaId)
+        .join(Property, Property.PropertyId == Inspection.PropertyId)
+        .where(Property.CompanyId == company_id)
+    )
+    if property_id is not None:
+        stmt = stmt.where(Inspection.PropertyId == property_id)
+    if grade is not None:
+        stmt = stmt.where(CleaningInspection.Grade == grade)
+    if status is not None:
+        stmt = stmt.where(CleaningInspection.Status == status)
+
+    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+
+    stmt = (
+        stmt.order_by(CleaningInspection.CleaningInspectionId.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = list(db.execute(stmt).all())
+    return rows, total
 
 
 def save_cleaning_inspection(db: Session, cleaning_inspection: CleaningInspection) -> CleaningInspection:

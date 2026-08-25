@@ -461,3 +461,83 @@ def test_upload_photo_to_cleaning_inspection_via_media_endpoint(
         db_session.commit()
     finally:
         _delete_inspection(db_session, inspection_id)
+
+
+# --- Standalone Cleaning module: GET /cleaning-inspections (list) and .../{id} (detail) --------
+
+
+def test_list_all_cleaning_inspections_includes_property_and_area_name(
+    client: TestClient,
+    db_session: Session,
+    northgate_admin,
+    northgate_property_id: int,
+    northgate_area_id: int,
+    template_id: int,
+) -> None:
+    headers = auth_headers(client, northgate_admin.Email)
+    inspection = _start_inspection(client, headers, northgate_property_id, template_id)
+    inspection_id = inspection["InspectionId"]
+
+    try:
+        create = client.post(
+            f"/api/inspections/{inspection_id}/cleaning",
+            json={"CleaningAreaId": northgate_area_id, "Grade": "C"},
+            headers=headers,
+        )
+        assert create.status_code == 201
+        cleaning_inspection_id = create.json()["CleaningInspectionId"]
+
+        listing = client.get("/api/cleaning-inspections", headers=headers)
+        assert listing.status_code == 200
+        matches = [i for i in listing.json()["items"] if i["CleaningInspectionId"] == cleaning_inspection_id]
+        assert len(matches) == 1
+        assert matches[0]["PropertyId"] == northgate_property_id
+        assert matches[0]["AreaName"] == "Test Area TMP"
+        assert matches[0]["Grade"] == "C"
+
+        filtered = client.get(
+            "/api/cleaning-inspections", params={"grade": "C", "property_id": northgate_property_id}, headers=headers
+        )
+        assert filtered.status_code == 200
+        assert cleaning_inspection_id in [i["CleaningInspectionId"] for i in filtered.json()["items"]]
+
+        filtered_out = client.get("/api/cleaning-inspections", params={"grade": "A"}, headers=headers)
+        assert filtered_out.status_code == 200
+        assert cleaning_inspection_id not in [i["CleaningInspectionId"] for i in filtered_out.json()["items"]]
+    finally:
+        _delete_inspection(db_session, inspection_id)
+
+
+def test_get_cleaning_inspection_detail_isolates_by_company(
+    client: TestClient,
+    db_session: Session,
+    northgate_admin,
+    bright_spaces_admin,
+    northgate_property_id: int,
+    northgate_area_id: int,
+    template_id: int,
+) -> None:
+    headers = auth_headers(client, northgate_admin.Email)
+    inspection = _start_inspection(client, headers, northgate_property_id, template_id)
+    inspection_id = inspection["InspectionId"]
+
+    try:
+        create = client.post(
+            f"/api/inspections/{inspection_id}/cleaning",
+            json={"CleaningAreaId": northgate_area_id, "Grade": "B"},
+            headers=headers,
+        )
+        cleaning_inspection_id = create.json()["CleaningInspectionId"]
+
+        own_view = client.get(f"/api/cleaning-inspections/{cleaning_inspection_id}", headers=headers)
+        assert own_view.status_code == 200
+        assert own_view.json()["AreaName"] == "Test Area TMP"
+        assert own_view.json()["PropertyId"] == northgate_property_id
+
+        other_view = client.get(
+            f"/api/cleaning-inspections/{cleaning_inspection_id}",
+            headers=auth_headers(client, bright_spaces_admin.Email),
+        )
+        assert other_view.status_code == 404
+    finally:
+        _delete_inspection(db_session, inspection_id)

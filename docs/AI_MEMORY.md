@@ -1722,3 +1722,70 @@ find a gap and add an endpoint" (Maintenance's `GET /api/users`, Sub-phase D's `
 response_id` filter) - sometimes the honest answer, arrived at by the same checking process, is
 that nothing needs to be added at all (this module). The value is in doing the check every time,
 not in the check always producing the same kind of result.
+
+## 2026-08-25 — Cleaning module built: closes two real gaps at once, needed two new backend endpoints and a fourth authorization tier
+
+Chose Cleaning next (own recommendation, not asked): `CleaningInspection` grading records
+already existed from the wizard's own "Grade Cleaning Area" gateway action (Sub-phase E) with
+nowhere to browse them, AND `CleaningAreas` had genuinely NO management UI at all - every
+property still only ever had the 3 auto-seeded areas from Phase 11, with no way to add any of
+scope §16's other named area types (Staircase, Landing, Communal Kitchen, Communal Bathroom,
+Garden, Laundry Area, Lift, Other). Two real gaps, closed together, not one feature stretched to
+look like two.
+
+**A genuinely deeper backend gap than either Maintenance or Sub-phase D's**, found by reading
+`cleaning_repository.py` before assuming a company-wide list would be trivial to add: every
+single CleaningInspection query in the entire codebase before this was scoped to one already-
+authorized Inspection (`list_cleaning_inspections_for_inspection` takes an `inspection_id`, no
+`company_id` at all) - there was no query ANYWHERE that could answer "show me this company's
+cleaning grades" the way Maintenance/Risk's flat list endpoints already could from day one.
+Added a real joined query (`list_cleaning_inspections_for_company`, CleaningInspection→
+Inspection→CleaningArea→Property) for the list, but deliberately did NOT reuse a joined query
+for the single-detail lookup - `get_cleaning_inspection_detail` composes three already-existing,
+already-authorized single-object fetchers instead (`get_cleaning_inspection`, `inspection_
+service.get_inspection`, `get_area`), since a single lookup doesn't need the efficiency a real
+JOIN buys for a paginated list, and reusing existing isolation-checked functions means no
+isolation logic gets written twice. `CleaningInspectionSummaryResponse` extends
+`CleaningInspectionResponse` with `PropertyId`/`AreaName` (neither a real column on the ORM
+model) via an explicit `from_row` classmethod, the SAME "never `.model_validate()` an object
+that doesn't have the attribute" pattern `MaintenanceIssueDetailResponse.from_issue` already
+established in Phase 10 - confirmed as a real, repeatable project convention now, not a one-off.
+
+**A FOURTH distinct Photos authorization tier this session, confirmed by reading
+`media_service.py` again rather than assuming either Maintenance's or Risk's shape carried
+over**: `CleaningInspection`'s media mutate check calls `inspection_service.ensure_can_edit` on
+the PARENT Inspection - narrow, like Maintenance's `canWork`, NOT RiskAssessment's unconditional
+"any company member" rule. This means `CleaningInspectionDetailPage` needs the parent
+Inspection's own `InspectorUserId`/`Status` to compute its own `canEdit` - no shortcut around
+fetching it, confirmed by reading `update_cleaning_inspection`'s exact isolation chain before
+writing the page. Four modules, four independently-verified tiers so far this session
+(Maintenance's `canWork`, Risk's unconditional, MeterReading's hybrid, now Cleaning's
+Inspection-anchored `canWork`) - the standing lesson isn't "there are two shapes to pick from,"
+it's "there is no default, check every time."
+
+**`PropertyDetailPage.jsx`'s new "Cleaning Areas" section mirrors the Units section's exact
+shape** (`CleaningAreaRow`/`AddCleaningAreaForm`, inline edit + add-form + `canManage`-gated
+mutation) - a deliberate copy of a proven pattern, not a new one invented for this. One real
+difference worth noting: `CleaningAreaUpdate.IsActive` is genuinely bidirectional (unlike
+Property's own one-way "Deactivate, no Reactivate" - the backend simply has no reactivate
+endpoint for Properties), so this toggle button correctly reads "Deactivate"/"Reactivate"
+depending on current state, not a fixed label the way Property's own button is.
+
+**Verified live, closing the full loop for real, not just each half in isolation**: as
+Administrator, added a genuinely new area ("Laundry Room," `AreaType=LaundryArea`, scope's own
+named type "15 High Road" never had) via the new PropertyDetailPage section - deactivated it
+(disappeared immediately from the default view), reactivated it, renamed it inline, all via real
+PATCH/GET round-trips. Started a real inspection on that same property and opened the EXISTING
+"Grade Cleaning Area" gateway action (Sub-phase E, unmodified) - confirmed the just-created area
+appeared as a real selectable option, proving the two new pieces are actually wired together,
+not two parallel UIs that happen to share a database table. Graded it (Grade D, Cleaning
+Required) - confirmed it appeared correctly on the NEW company-wide list with the right resolved
+Property/Area names (the join actually works, not just compiles). Edited it on the detail page
+(Status→Completed, assigned a real user) - confirmed via toast and re-render. Uploaded a real
+photo. Logged in as an Inspector NOT assigned to that specific inspection - confirmed neither
+Edit nor the photo-upload control appeared (the narrow tier, correctly enforced), while the
+photo itself still rendered (view stays open to any company member, unaffected by the narrower
+mutate tier). A cross-company Administrator got a real 404 on the new detail endpoint. No
+horizontal overflow at 375px on any of the three surfaces touched (Areas section, List, Detail).
+All test data (the area, the inspection and its 102 responses, the cleaning grade, its media row
+and file) cleaned up afterward.

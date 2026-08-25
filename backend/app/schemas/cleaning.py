@@ -74,3 +74,32 @@ class CleaningInspectionResponse(BaseModel):
     AssignedUserId: int | None
     DueDate: date | None
     Status: str
+
+
+class CleaningInspectionSummaryResponse(CleaningInspectionResponse):
+    """The standalone Cleaning module's own shape (list + single detail) - adds PropertyId/
+    AreaName, neither a real column on CleaningInspection itself (docs/DATABASE.md's table
+    sketch has no PropertyId there; it's reached only via Inspection, and AreaName only via
+    CleaningArea). Built explicitly via from_row/from_parts, never `.model_validate()` on a bare
+    CleaningInspection - that ORM object has no such attributes, unlike CleaningInspectionResponse
+    above which every per-inspection create/list/update route still uses unchanged."""
+
+    PropertyId: int
+    AreaName: str
+
+    @classmethod
+    def from_row(cls, cleaning_inspection, property_id: int, area_name: str) -> "CleaningInspectionSummaryResponse":
+        return cls(
+            CleaningInspectionId=cleaning_inspection.CleaningInspectionId,
+            InspectionId=cleaning_inspection.InspectionId,
+            CleaningAreaId=cleaning_inspection.CleaningAreaId,
+            Grade=cleaning_inspection.Grade,
+            Notes=cleaning_inspection.Notes,
+            CleaningRequired=cleaning_inspection.CleaningRequired,
+            Urgent=cleaning_inspection.Urgent,
+            AssignedUserId=cleaning_inspection.AssignedUserId,
+            DueDate=cleaning_inspection.DueDate,
+            Status=cleaning_inspection.Status,
+            PropertyId=property_id,
+            AreaName=area_name,
+        )

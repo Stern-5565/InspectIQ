@@ -156,6 +156,42 @@ def get_cleaning_inspection(db: Session, current_user: User, cleaning_inspection
     return cleaning_inspection
 
 
+def list_cleaning_inspections_for_company(
+    db: Session,
+    current_user: User,
+    *,
+    page: int,
+    page_size: int,
+    property_id: int | None = None,
+    grade: str | None = None,
+    status: str | None = None,
+) -> tuple[list, int]:
+    """The standalone Cleaning module's list - see repo.list_cleaning_inspections_for_company's
+    own docstring for why this didn't exist before that module needed it."""
+    return repo.list_cleaning_inspections_for_company(
+        db,
+        current_user.CompanyId,
+        page=page,
+        page_size=page_size,
+        property_id=property_id,
+        grade=grade,
+        status=status,
+    )
+
+
+def get_cleaning_inspection_detail(db: Session, current_user: User, cleaning_inspection_id: int):
+    """The standalone Cleaning module's single-detail lookup - composes three already-existing,
+    already-authorized single-object fetchers (this function's own get_cleaning_inspection,
+    inspection_service.get_inspection for PropertyId, get_area for AreaName) rather than a new
+    joined repository query - the list above needs a real query for pagination efficiency across
+    many rows, but a single detail lookup is cheap enough as three plain calls, and reusing them
+    means no isolation logic is duplicated."""
+    cleaning_inspection = get_cleaning_inspection(db, current_user, cleaning_inspection_id)
+    inspection = inspection_service.get_inspection(db, current_user, cleaning_inspection.InspectionId)
+    area = get_area(db, current_user, cleaning_inspection.CleaningAreaId)
+    return cleaning_inspection, inspection.PropertyId, area.AreaName
+
+
 def update_cleaning_inspection(
     db: Session, current_user: User, cleaning_inspection_id: int, payload: CleaningInspectionUpdate
 ) -> CleaningInspection:

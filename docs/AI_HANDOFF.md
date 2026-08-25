@@ -1126,10 +1126,66 @@ Current status. Overwrite/update this file at the end of every session or phase 
     overflow. All test data (the risk assessment and both media rows/files) cleaned up
     afterward.
 
+- **Phase 16 continued — the standalone Cleaning module (grading history list/detail + a
+  CleaningAreas config section on PropertyDetailPage) complete.** The third of Phase 16's
+  remaining standalone modules, and the first this session to genuinely need TWO real backend
+  additions before the frontend could exist at all - not because the pattern found "something to
+  add" reflexively, but because nothing before this module ever queried CleaningInspections
+  across a whole company (every prior query was scoped to one already-authorized Inspection).
+  - **Backend**: `GET /cleaning-inspections` (paginated, filters: property_id/grade/status) and
+    `GET /cleaning-inspections/{id}` - both new, `app/api/cleaning.py`. New
+    `cleaning_repository.list_cleaning_inspections_for_company` (a real joined query across
+    CleaningInspection→Inspection→CleaningArea→Property, since the list needs `PropertyId`/
+    `AreaName` neither is a real column on `CleaningInspection` itself) and
+    `cleaning_service.get_cleaning_inspection_detail` (composes three ALREADY-existing,
+    already-authorized single-object fetchers for the single-detail case instead of a second
+    joined query - the list needed a real query for pagination efficiency, a single lookup
+    didn't). New `CleaningInspectionSummaryResponse(CleaningInspectionResponse)` schema adding
+    `PropertyId`/`AreaName`, built via an explicit `from_row` classmethod - never
+    `.model_validate()` on a bare ORM object, which has neither attribute (every existing per-
+    inspection create/list/update route keeps using the original `CleaningInspectionResponse`
+    unchanged). 2 new tests (134 total), full suite re-run clean.
+  - `pages/cleaning/CleaningInspectionsListPage.jsx`, `CleaningInspectionDetailPage.jsx`
+    (inline edit, no separate `/edit` route - PropertyManager-style but on ONE page since there's
+    no create mode to share it with). No `/cleaning-inspections/new` route - grading only ever
+    happens from within an Inspection (`CleaningInspection.InspectionId` is `NOT NULL`), the same
+    wizard-only reasoning as Maintenance.
+  - **`PropertyDetailPage.jsx` gained a full "Cleaning Areas" section** - `CleaningAreaRow`/
+    `AddCleaningAreaForm`, mirroring the existing Units section's exact shape (inline edit +
+    add-form + `canManage`-gated mutation). Closes a real, standing gap: properties only ever
+    had the 3 auto-seeded areas (Phase 11) with literally no UI anywhere to add the rest of
+    scope §16's own list (Staircase, Landing, Communal Kitchen, Communal Bathroom, Garden,
+    Laundry Area, Lift, Other) until now. `CleaningAreaUpdate.IsActive` is genuinely two-way
+    (unlike Property's one-way Deactivate), so the toggle here can reactivate too.
+  - **Confirmed a THIRD distinct Photos tier, by reading `media_service.py` again rather than
+    assuming either prior module's shape**: `CleaningInspection`'s media mutate check calls
+    `inspection_service.ensure_can_edit` on the PARENT Inspection - the same narrow tier as
+    Maintenance (`canWork`-shaped), NOT RiskAssessment's unconditional "any company member" one.
+    `CleaningInspectionDetailPage` computes `canEdit` itself by fetching the parent Inspection
+    (no shortcut around this second fetch - `ensure_can_edit` needs that Inspection's own
+    `InspectorUserId`/`Status`), the same pattern `InspectionWizardLayout` already established.
+  - `StatusBadge`'s tone map gained Cleaning's `Status` values and single-letter `Grade`s
+    (`a`-`e`, scope §16's own Excellent→Critical meanings) - grown incrementally again.
+  - **Verified live, end to end, closing the full loop for real**: as Administrator, added a
+    genuinely new cleaning area ("Laundry Room," a type "15 High Road" never had) via the new
+    PropertyDetailPage section, deactivated it (disappeared immediately), reactivated it, renamed
+    it inline - all confirmed via real PATCH/GET round-trips. Started a real inspection on that
+    same property and used the existing "Grade Cleaning Area" gateway action (Sub-phase E) -
+    confirmed the just-created area appeared as a real option, proving the two new pieces
+    (Areas config, grading) are actually connected, not just parallel unconnected UIs. Graded it
+    (D, Cleaning Required) - confirmed it appeared correctly on the NEW company-wide List page
+    with the right resolved Property/Area names. Edited it on the Detail page (Status→Completed,
+    Assigned→a real user) - confirmed via the toast and a re-render. Uploaded a real photo.
+    Logged in as an Inspector NOT assigned to that inspection - confirmed neither Edit nor the
+    photo-upload control appeared (the narrower `canWork`-shaped tier, correctly NOT the
+    RiskAssessment-style unconditional one), while the photo itself still rendered (view-level).
+    A cross-company Administrator got a real 404 on the new detail endpoint. No horizontal
+    overflow at 375px on Areas, List, or Detail. All test data (the area, the inspection and its
+    102 responses, the cleaning grade, its media row and file) cleaned up afterward.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (the Risk Register module) to git is the next
-  action.
+- Nothing in progress. Committing this batch (the Cleaning module) to git is the next action.
 
 ## Important decisions
 
@@ -1303,23 +1359,34 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
      "What has been completed" entry above for why). No backend changes needed this time. Two
      tiers (`canManage` for Edit, unconditional `editable` for Photos - a genuinely different,
      independently-confirmed rule from Maintenance's).
-   - **Remaining, per Prompt 16's own page list**: Cleaning (areas config, grading history),
-     Vacant Units (list/detail), Meter Readings (list/detail), Admin Settings, and a Risk Matrix
-     configuration screen (create/edit `RiskMatrixLevels` - scope §19's "the exact risk matrix
-     should remain configurable," deliberately deferred from this pass as a secondary feature
-     relative to the main Risk Register CRUD, not silently dropped). The wizard's quick-create
-     modals (Sub-phases D/E) let an inspector CREATE a MeterReading/VacantUnitInspection/
-     CleaningInspection from inside an inspection, the same gap Maintenance/Risk had - there's
-     still no page anywhere in the app to browse, filter, or manage those records afterward. No
-     order has been decided for these yet - an open decision for a future session, not something
-     2026-08-25's planning session covered (it only approved the wizard's own six sub-phases).
+   - **Cleaning — DONE** (commit pending as of this writing) - grading history list/detail
+     (needed two new backend endpoints, `GET /cleaning-inspections` and `.../{id}`, since nothing
+     before this queried CleaningInspections across a whole company) plus a CleaningAreas config
+     section added to `PropertyDetailPage.jsx`. See the "What has been completed" entry above for
+     the full detail, including the third distinct Photos authorization tier confirmed this
+     session.
+   - **Remaining, per Prompt 16's own page list**: Vacant Units (list/detail), Meter Readings
+     (list/detail), Admin Settings, and a Risk Matrix configuration screen (create/edit
+     `RiskMatrixLevels` - scope §19's "the exact risk matrix should remain configurable,"
+     deliberately deferred from the Risk Register pass as a secondary feature, not silently
+     dropped). The wizard's quick-create modals (Sub-phase D) let an inspector CREATE a
+     MeterReading/VacantUnitInspection from inside an inspection, the same gap Maintenance/Risk/
+     Cleaning had - there's still no page anywhere in the app to browse, filter, or manage those
+     records afterward. No order has been decided for these yet - an open decision for a future
+     session, not something 2026-08-25's planning session covered (it only approved the wizard's
+     own six sub-phases).
    - A pattern worth reusing across all of these, confirmed multiple times now (Maintenance's
-     `GET /api/users`, Sub-phase D's `inspection_response_id` filter, and Risk Register
-     confirming the OPPOSITE - that sometimes the existing API surface already IS enough): read
-     the relevant `_service.py` file's authorization logic BEFORE designing each module's
-     frontend gating, and check whether the existing API surface actually supports what a
-     management page needs (a picker, a filter) before assuming it does either way - don't
-     assume a gap exists any more than assuming one doesn't.
+     `GET /api/users`, Sub-phase D's `inspection_response_id` filter, Cleaning's two new
+     `/cleaning-inspections` endpoints, and Risk Register confirming the OPPOSITE - that
+     sometimes the existing API surface already IS enough): read the relevant `_service.py`
+     file's authorization logic BEFORE designing each module's frontend gating, and check
+     whether the existing API surface actually supports what a management page needs (a picker,
+     a filter, a company-wide query) before assuming it does either way - don't assume a gap
+     exists any more than assuming one doesn't. Also worth carrying forward: when a new response
+     shape needs fields that aren't real columns on the underlying ORM object (Cleaning's
+     `PropertyId`/`AreaName`), build it via an explicit classmethod (`from_row`/`from_issue`-
+     style) rather than reaching for `.model_validate()` on an object that doesn't have them -
+     this project's now-standing convention, confirmed working a third time.
 
 ## Files that require attention
 

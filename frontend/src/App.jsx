@@ -47,6 +47,17 @@
  * per-record carve-out at all (confirmed by reading risk_service.py: the one combined PATCH is
  * Administrator/Manager only, full stop), so a static role-gated route is sufficient here with
  * no extra per-record computation needed on the page itself.
+ *
+ * Cleaning: view (list/detail) has no role restriction. No `/cleaning-inspections/new` or
+ * `/:id/edit` routes at all - mutation is a per-record check computed on
+ * `CleaningInspectionDetailPage` itself (mirroring Inspections' `canEdit` exactly: the parent
+ * Inspection's assigned inspector, or Administrator/Manager), the same reason
+ * `InspectionWizardLayout`/`MaintenanceIssueDetailPage` compute their own tiers rather than a
+ * route-level gate - and, like Maintenance, grading only ever happens from within an Inspection
+ * (structurally enforced: `CleaningInspection.InspectionId` is NOT NULL), so no standalone
+ * create route exists either. CleaningAreas (the per-property config half of this module) has
+ * no routes of its own at all - it lives inside `PropertyDetailPage`, the same reasoning Units
+ * already established.
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -74,6 +85,8 @@ import { MaintenanceIssueFormPage } from "./pages/maintenance/MaintenanceIssueFo
 import { RiskAssessmentsListPage } from "./pages/risk/RiskAssessmentsListPage";
 import { RiskAssessmentDetailPage } from "./pages/risk/RiskAssessmentDetailPage";
 import { RiskAssessmentFormPage } from "./pages/risk/RiskAssessmentFormPage";
+import { CleaningInspectionsListPage } from "./pages/cleaning/CleaningInspectionsListPage";
+import { CleaningInspectionDetailPage } from "./pages/cleaning/CleaningInspectionDetailPage";
 import {
   CAN_MANAGE_PROPERTIES,
   CAN_CONDUCT_INSPECTIONS,
@@ -134,6 +147,9 @@ export function App() {
                 <Route element={<ProtectedRoute allowedRoles={CAN_MANAGE_RISK} />}>
                   <Route path="/risk-assessments/:id/edit" element={<RiskAssessmentFormPage />} />
                 </Route>
+
+                <Route path="/cleaning-inspections" element={<CleaningInspectionsListPage />} />
+                <Route path="/cleaning-inspections/:id" element={<CleaningInspectionDetailPage />} />
               </Route>
             </Route>
 
