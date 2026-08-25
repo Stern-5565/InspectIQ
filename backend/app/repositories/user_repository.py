@@ -43,3 +43,29 @@ def list_users_for_company(db: Session, company_id: int, *, include_inactive: bo
     if not include_inactive:
         stmt = stmt.where(User.IsActive == True)  # noqa: E712 - MSSQL's IS only accepts NULL, see Phase 15's gotcha
     return list(db.execute(stmt).unique().scalars().all())
+
+
+def get_user_by_id_for_company(db: Session, company_id: int, user_id: int) -> User | None:
+    """Admin Settings' own addition - the exact "admin looks up a user by ID in their own
+    company" case this file's own module docstring named as needing CompanyId scoping, unlike
+    get_user_by_id above (safe only because its one caller, get_current_user, is reloading the
+    ALREADY-AUTHENTICATED user's own record, not an arbitrary ID)."""
+    stmt = (
+        select(User)
+        .options(joinedload(User.roles))
+        .where(User.CompanyId == company_id, User.UserId == user_id)
+    )
+    return db.execute(stmt).unique().scalar_one_or_none()
+
+
+def create_user(db: Session, user: User) -> User:
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def save_user(db: Session, user: User) -> User:
+    db.commit()
+    db.refresh(user)
+    return user

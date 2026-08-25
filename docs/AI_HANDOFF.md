@@ -1217,10 +1217,56 @@ Current status. Overwrite/update this file at the end of every session or phase 
   resolved `PropertyName` and the photo rendered as an authenticated blob, confirmed/corrected the
   reading from the standalone detail page, cross-company 404 on both new endpoints. Full detail in
   `docs/AI_MEMORY.md`'s 2026-08-25 entry.
+- **Phase 16 continued — the standalone Admin Settings module (Company Profile + Team Members)
+  complete.** The sixth and final NAMED Phase 16 standalone module (only the Risk Matrix
+  configuration screen remains). Unlike every module since Maintenance, this one needed real
+  net-new backend from scratch, not an enrichment of something existing - Company had no CRUD at
+  all yet, and Users had only read-only list/get. Scope names "Admin Settings" as a page title
+  with no field detail; the actual shape came from `app/api/users.py`'s own forward-declared
+  docstring ("user management (inviting/deactivating a user) is Admin Settings' job") plus scope
+  §3/§4's literal field lists.
+  - **Backend**: new `role_repository.get_role_by_name` (the first query against `Roles` outside
+    the seed script), `company_repository.py`/`company_service.py`/`app/api/company.py`
+    (`GET`/`PATCH /api/company`, no path parameter - resolved from `current_user.CompanyId`,
+    since a user only ever sees/edits their OWN company), `user_service.py` (new -
+    `create_user`/`update_user`/`get_user`, plus `list_users` moved through it too, cleaning up
+    a pre-existing minor exception to this project's "routes call services" layering rule now
+    that real business logic exists). `UserCreate`/`UserUpdate` schemas.
+  - **The first Admin-only-EXCLUDING-Manager authorization tier in this project** - confirmed by
+    rereading scope §3's own role table rather than assuming Manager's usual tier applied: only
+    Administrator is described as "Full access," Manager's own definition names nothing about
+    managing teammates or company settings. Also the first page where even VIEWING is
+    role-restricted (`CAN_MANAGE_ADMIN_SETTINGS`, frontend), not just mutation.
+  - **No email-invite pipeline** - confirmed no SMTP/notification service exists anywhere in this
+    codebase. An Administrator sets a new teammate's initial password directly via
+    `UserCreate.Password` (same `hash_password` login/seeding already use). `RoleName` is a
+    single string, not a list, matching every seeded user's actual single-role shape.
+  - **A real, deliberately-added safety rail**: an Administrator cannot deactivate their own
+    account (`user_service.update_user` raises 422) - mirrored on the frontend by disabling that
+    one row's Deactivate button, not just relying on a round-trip failure.
+  - `pages/admin/AdminSettingsPage.jsx` reuses `PropertyDetailPage.jsx`'s inline-edit-row /
+    add-form-below-the-table shape (no new modal pattern invented). Reachable only via a
+    `Sidebar.jsx` link gated with `hasAnyRole` (the first non-unconditional nav link in the
+    project) plus a route wrapped in its own `ProtectedRoute allowedRoles=
+    {CAN_MANAGE_ADMIN_SETTINGS}` - both checked independently.
+  - 14 new tests (152 total): user create (including a real login as the new account), duplicate
+    email 409, unknown role 422, Manager 403 on create/update (confirming the tier truly excludes
+    Manager), role-change + deactivate in one PATCH, self-deactivation 422, cross-company 404;
+    company GET open to Manager, isolation, partial PATCH, Manager 403, empty-name 422. A new
+    test-fixture situation: `Company` has no throwaway-row option (one profile row per company,
+    not create-then-delete), so `test_company.py`'s `restore_northgate_company` fixture snapshots
+    and restores every PATCH-able field.
+  - **Verified live as three different users**: created a real teammate account as Northgate's
+    Administrator, confirmed via real `curl` login it actually works; edited their role and
+    deactivated them, confirmed via a second `curl` login that deactivation genuinely blocks
+    access; edited the Company Profile's Telephone. Logged in as a Manager - the sidebar link was
+    absent and direct navigation 403'd. Logged in as the Bright Spaces Administrator - both
+    sections showed only that company's own data. All test data cleaned up/restored afterward.
+    Full detail in `docs/AI_MEMORY.md`'s 2026-08-25 entry.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (the Meter Readings module) to git is the next
+- Nothing in progress. Committing this batch (the Admin Settings module) to git is the next
   action.
 
 ## Important decisions
@@ -1336,34 +1382,36 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (standalone Meter Readings module) to git.
+1. Commit this batch (standalone Admin Settings module) to git.
 2. **The Inspection engine wizard (Prompt 17, all six sub-phases A-F) and Phase 16's Maintenance,
-   Risk Register, Cleaning, Vacant Units, and Meter Readings standalone modules are all DONE and
-   committed** (see the "What has been completed" section above for each one's own detail, and
-   `docs/AI_MEMORY.md`'s 2026-08-25 entries for the full design/build history).
+   Risk Register, Cleaning, Vacant Units, Meter Readings, and Admin Settings standalone modules
+   are all DONE and committed** (see the "What has been completed" section above for each one's
+   own detail, and `docs/AI_MEMORY.md`'s 2026-08-25 entries for the full design/build history).
 3. **Phase 16 itself is still NOT done** - its own exit criteria
    (`PROJECT_PLAN.md §11`: "All pages navigable, auth-gated correctly") means every module needs
    its own standalone list/detail pages, the same way Properties got `PropertiesListPage`/
-   `PropertyDetailPage`/`PropertyFormPage`. **Remaining, per Prompt 16's own page list**: Admin
-   Settings, and a Risk Matrix configuration screen (create/edit `RiskMatrixLevels` - scope §19's
-   "the exact risk matrix should remain configurable," deliberately deferred from the Risk
-   Register pass as a secondary feature, not silently dropped). No order has been decided for
-   these yet - an open decision for a future session.
-   - A pattern worth reusing for whichever of these is next, confirmed six times now across
-     Maintenance/Sub-phase D/Cleaning/Vacant Units (and Risk Register + Meter Readings each
-     confirming the OPPOSITE - that sometimes the existing API surface already IS enough): read
-     the relevant `_service.py`/`_repository.py` file's authorization logic and query shape
-     BEFORE designing a module's frontend or assuming a backend gap exists - don't assume a gap
-     exists any more than assuming one doesn't; Meter Readings this session needed a display
-     enrichment (`PropertyName`/`InspectionId`) but genuinely no new route. Also worth carrying
-     forward: when a new response shape needs fields that aren't real columns on the underlying
-     ORM object, build it via an explicit classmethod (`from_row`-style) rather than reaching for
-     `.model_validate()` on an object that doesn't have them - confirmed working a fifth time with
-     Meter Readings, and when enriching an EXISTING query/route rather than adding a new one,
-     check every other caller of the function being changed first (Meter Readings' `get_
-     meter_reading` had to stay untouched because `media_service.py` and `update_meter_reading`
-     both depend on it returning a bare ORM object, not a tuple - the enrichment went into a new,
-     separate function instead).
+   `PropertyDetailPage`/`PropertyFormPage`. **Only one page remains from Prompt 16's own list**: a
+   Risk Matrix configuration screen (create/edit `RiskMatrixLevels` - scope §19's "the exact risk
+   matrix should remain configurable," deliberately deferred from the Risk Register pass as a
+   secondary feature, not silently dropped; `GET/POST/PATCH /api/risk-matrix-levels` already
+   exist per Phase 13, so this is very likely another "enrich/build frontend against an existing
+   API" pass like Meter Readings, not a from-scratch one like Admin Settings - confirm by reading
+   `app/api/risk.py`/`risk_service.py` first, don't assume either way).
+   - A pattern worth reusing for the Risk Matrix screen, confirmed across every module built this
+     stretch (Maintenance/Sub-phase D/Cleaning/Vacant Units needed new backend; Risk Register +
+     Meter Readings needed genuinely none; Admin Settings needed real net-new backend from
+     scratch because nothing existed yet for Company/user-mutation at all): read the relevant
+     `_service.py`/`_repository.py`/`_api.py` files FIRST, every time, before assuming a gap
+     exists OR assuming one doesn't - the answer has gone every direction this stretch, and
+     guessing has been wrong in both directions when tried. Also worth carrying forward: build a
+     response shape needing fields that aren't real ORM columns via an explicit `from_row`
+     classmethod, never `.model_validate()` on an object that doesn't have them (confirmed
+     working six times now); when enriching an EXISTING function rather than adding a new one,
+     check every other caller of it first (Meter Readings' `get_meter_reading` had to stay
+     untouched for this reason); and check scope's OWN role table before assuming a new module's
+     authorization tier matches the "usual" Admin/Manager pattern - Admin Settings this session
+     was the first tier to genuinely exclude Manager, found only by rereading scope §3 rather
+     than copying every prior module's shape.
 
 ## Files that require attention
 

@@ -1,16 +1,24 @@
 /**
  * Nav list only - grows one <NavLink> per module as each module's frontend gets built
  * (Dashboard, Properties, Inspection Templates, Inspections, Maintenance, Risk Register,
- * Cleaning, Vacant Units, Meter Readings so far). Mobile-first: collapsed
+ * Cleaning, Vacant Units, Meter Readings, Admin Settings so far). Mobile-first: collapsed
  * off-canvas by default below the desktop breakpoint, toggled by Header's hamburger button (see
  * MainLayout's `sidebarOpen` state) - always visible on wider viewports regardless of that
- * state (styles/global.css). None of these links carry a role gate here even though managing a
- * property or starting an inspection does (constants/roles.js) - every role can at least view
- * each list, so the nav links themselves stay unconditional.
+ * state (styles/global.css). Every link above Admin Settings carries no role gate here even
+ * though managing a property or starting an inspection does (constants/roles.js) - every role
+ * can at least view each list, so those nav links stay unconditional. Admin Settings is the
+ * first exception: the whole page is Administrator-only even to VIEW (App.jsx), so showing the
+ * link to anyone else would just send them to the Unauthorized page - gated here with
+ * `hasAnyRole` rather than leaving it unconditional like every link above it.
  */
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
+import { hasAnyRole } from "../utilities/permissions";
+import { CAN_MANAGE_ADMIN_SETTINGS } from "../constants/roles";
 
 export function Sidebar({ open, onNavigate }) {
+  const { user } = useAuth();
+
   return (
     <>
       {open && <div className="sidebar-backdrop" onClick={onNavigate} aria-hidden="true" />}
@@ -43,6 +51,11 @@ export function Sidebar({ open, onNavigate }) {
         <NavLink to="/meter-readings" className="sidebar__link" onClick={onNavigate}>
           Meter Readings
         </NavLink>
+        {hasAnyRole(user, CAN_MANAGE_ADMIN_SETTINGS) && (
+          <NavLink to="/admin-settings" className="sidebar__link" onClick={onNavigate}>
+            Admin Settings
+          </NavLink>
+        )}
       </nav>
     </>
   );

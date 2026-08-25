@@ -57,3 +57,12 @@ export const CAN_MANAGE_MAINTENANCE = [ADMINISTRATOR, MANAGER];
 // with no per-record carve-out - unlike Maintenance's `canWork`, nobody else can edit a risk
 // assessment just by being its ResponsiblePersonUserId.
 export const CAN_MANAGE_RISK = [ADMINISTRATOR, MANAGER];
+
+// Admin Settings (Company Profile + User Management): the ENTIRE page is gated to
+// Administrator only, not just its mutate actions - the first module where even VIEWING is
+// restricted (every module above keeps "view = any company member," but nobody but an
+// Administrator has a reason to be on a page whose only content is editing teammates/company
+// details). Also the first Admin-only tier that excludes Manager (app/services/user_service.py's
+// own module docstring: scope §3's Manager definition names nothing about managing teammates,
+// only Administrator is "Full access").
+export const CAN_MANAGE_ADMIN_SETTINGS = [ADMINISTRATOR];

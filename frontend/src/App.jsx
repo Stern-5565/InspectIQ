@@ -73,6 +73,13 @@
  * genuinely hybrid tier, confirmed by reading meter_reading_service.py: Inspection-linked reuses
  * the assigned-inspector-or-Admin/Manager rule, a standalone reading falls back to Admin/Manager
  * only).
+ *
+ * Admin Settings: the ONLY route in this file gated to `CAN_MANAGE_ADMIN_SETTINGS`
+ * (`[ADMINISTRATOR]`, excluding Manager) at the VIEW level, not just for mutation - every other
+ * gated route above still lets any company member view, narrowing only create/edit. Company
+ * Profile + Team Members are both Admin-only end to end (backend confirmed by reading
+ * app/services/user_service.py/company_service.py before assuming otherwise), so there is no
+ * "any company member can view" half to expose here the way Properties/Maintenance/Risk have.
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -106,11 +113,13 @@ import { VacantUnitInspectionsListPage } from "./pages/vacant-units/VacantUnitIn
 import { VacantUnitInspectionDetailPage } from "./pages/vacant-units/VacantUnitInspectionDetailPage";
 import { MeterReadingsListPage } from "./pages/meter-readings/MeterReadingsListPage";
 import { MeterReadingDetailPage } from "./pages/meter-readings/MeterReadingDetailPage";
+import { AdminSettingsPage } from "./pages/admin/AdminSettingsPage";
 import {
   CAN_MANAGE_PROPERTIES,
   CAN_CONDUCT_INSPECTIONS,
   CAN_MANAGE_MAINTENANCE,
   CAN_MANAGE_RISK,
+  CAN_MANAGE_ADMIN_SETTINGS,
 } from "./constants/roles";
 
 export function App() {
@@ -175,6 +184,10 @@ export function App() {
 
                 <Route path="/meter-readings" element={<MeterReadingsListPage />} />
                 <Route path="/meter-readings/:id" element={<MeterReadingDetailPage />} />
+
+                <Route element={<ProtectedRoute allowedRoles={CAN_MANAGE_ADMIN_SETTINGS} />}>
+                  <Route path="/admin-settings" element={<AdminSettingsPage />} />
+                </Route>
               </Route>
             </Route>
 

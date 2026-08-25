@@ -7,6 +7,7 @@ from starlette.responses import JSONResponse
 from app.api import (
     auth,
     cleaning,
+    company,
     dashboard,
     health,
     inspection_templates,
@@ -65,3 +66,4 @@ app.include_router(risk.router, prefix="/api")
 app.include_router(meter_readings.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(company.router, prefix="/api")

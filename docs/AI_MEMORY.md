@@ -1897,3 +1897,117 @@ respecting the FK order discovered live: `MeterReadings.PhotoMediaFileId` refere
 
 **Remaining Phase 16 pages**: Admin Settings and a Risk Matrix configuration screen. No order
 decided yet for a future session.
+
+## 2026-08-25 — Admin Settings module built: the first module needing real net-new backend from scratch since Cleaning, and the first Admin-only-excluding-Manager tier in the project
+
+Sixth and final named Phase 16 standalone module before the Risk Matrix configuration screen.
+Unlike every module since Maintenance, this one had NOTHING to read first - no service, no
+repository beyond the bare `list_users_for_company`/`get_user_by_email`/`get_user_by_id`
+Phase 5/Maintenance already added, and Company had no CRUD at all (its own model docstring,
+written back in Phase 5, explicitly deferred it: "Full Company CRUD/business logic isn't part
+of Phase 5"). Scope itself only names "Admin Settings" as a page title with no field-level
+detail - the actual shape came from two places: `app/api/users.py`'s own forward-declared
+docstring ("user management (inviting/deactivating a user) is Admin Settings' job") and scope
+§3/§4's literal field lists for User (First/Last name, Email, Phone, Password, Company, Role,
+Active/inactive, Date created, Last login) and Company (name, Address, Telephone, Email, Logo,
+Active, Date created).
+
+**A genuinely new authorization tier - the first in this project that's Admin-only and
+EXCLUDES Manager.** Every prior "narrower than any-company-member" tier (Properties/
+Maintenance-general-edit/Cleaning-areas/Risk-update) still included Manager alongside
+Administrator. Confirmed by rereading scope §3's own role table rather than assuming Manager's
+usual "second-in-command" tier applied here too: Manager's definition ("Manage properties, view
+all inspections, assign inspections, manage maintenance, view reports") names nothing about
+managing teammates or company settings; only Administrator is described as "Full access." This
+is also the first page where even VIEWING is role-restricted (`CAN_MANAGE_ADMIN_SETTINGS`,
+frontend `constants/roles.js`) - every module before this kept "view = any company member" even
+when mutation was narrower, but nobody who isn't already an Administrator has a reason to be on
+a page whose only content is editing teammates/company details.
+
+**No email-invite pipeline** - confirmed by checking there's no SMTP/notification service
+anywhere in this codebase (scope §14's "Channels eventually: In-app, Email" is explicitly
+deferred infrastructure). An Administrator sets a new teammate's initial password directly via
+`UserCreate.Password` (hashed with the same `hash_password` the seed script and login already
+use) - the practical option available today, not an invented invite-email flow this pass
+doesn't need. `RoleName` is a single string on both `UserCreate`/`UserUpdate`, not a list, even
+though `Users`↔`Roles` is a real M:N join at the DB level - every seeded user has exactly one
+role and nothing in scope or the existing UI assumes multi-role support, so the form doesn't
+build UI for a capability nothing exercises.
+
+**A real, cheap safety rail added deliberately, not because scope asked for it**: an
+Administrator cannot deactivate their OWN account via `PATCH /api/users/{id}` (`user_service.
+update_user` raises `ValidationError`/422 - the same status code Maintenance's own "no-op status
+transition" check uses for a similarly-shaped self-inflicted-bad-state check) - the one obvious
+lockout footgun worth guarding against; a corresponding "can't remove your own Administrator
+role" guard was deliberately NOT added (no concrete scenario asks for it, and the account-lockout
+case is the one that's actually irreversible without direct DB access). Mirrored on the frontend
+by disabling that one row's Deactivate button with an explanatory `title`, not just relying on
+the backend 422 to round-trip.
+
+**New `role_repository.py`** (the first thing to query `Roles` outside the seed script -
+`get_role_by_name`, since a submitted `RoleName` string has to resolve to the real row
+`UserRoles` links to, not just be validated against a Python constant list) and **new
+`company_repository.py`/`company_service.py`/`app/api/company.py`** (`GET`/`PATCH /api/company`,
+no path parameter at all - a user can only ever see/edit their OWN company, resolved from
+`current_user.CompanyId`, the simplest possible isolation case in this project since there's no
+"list many companies" access pattern to guard against). `CompanyUpdate` deliberately excludes
+`LogoPath` (no file-upload flow exists for a single company logo - not invented for this pass)
+and `IsActive`/`CreatedAt` (a company doesn't deactivate itself from its own settings page - a
+platform-operator action outside this app's own scope).
+
+**`app/api/users.py`'s existing `list_users` route was routed through a NEW `user_service.py`**
+instead of calling `user_repository` directly, the way it always had since the Maintenance
+module added it - a deliberate cleanup, not scope creep: that direct-repository call was
+originally an acceptable minor exception to this project's "routes call services" layering
+rule (a read-only passthrough has no business logic to house), but now that real business logic
+exists in this router (duplicate-email/unknown-role checks, the self-deactivation guard),
+leaving `list_users` as the one inconsistent route would be worse than the two-line change to
+route it through the service too.
+
+8 new user tests + 6 new company tests (152 total): user create success (including a real
+login as the newly-created user, not just checking the response shape), duplicate-email 409,
+unknown-role 422, Manager 403 on both create and update (confirming the new tier really excludes
+Manager), role-change + deactivate together in one PATCH, self-deactivation 422, cross-company
+404 on update; company GET open to Manager, isolation by company, PATCH-only-supplied-fields,
+Manager 403 on update, empty-CompanyName 422. Full suite reruns clean.
+
+**A new test-fixture situation, not an app bug**: `Company` has no throwaway-row option the way
+every other module's tests do (create-then-delete) - each company has exactly one profile row,
+and `PATCH` mutates real seeded demo data. `test_company.py`'s `restore_northgate_company`
+fixture snapshots every PATCH-able field before the test and restores them afterward, the same
+"the one fixture that mutates shared seed data" situation Phase 12's `occupied_unit_id` fixture
+first established, now confirmed a second time for a different reason (a singleton row instead
+of a reused shared unit).
+
+**`pages/admin/AdminSettingsPage.jsx`** reuses `PropertyDetailPage.jsx`'s established
+inline-edit-row / add-form-below-the-table shape (Units/Cleaning Areas sections) rather than
+inventing a modal-based pattern - Company Profile is one inline-edit record, Team Members is a
+table with per-row inline edit (name/phone/role) plus a separate immediate Deactivate/Reactivate
+toggle, exactly mirroring `CleaningAreaRow`'s two-actions-per-row shape. The whole page is
+reachable only via a `Sidebar.jsx` link gated with `hasAnyRole` (the first nav link in the
+project that isn't unconditional) and a route wrapped in a second `ProtectedRoute` with
+`allowedRoles={CAN_MANAGE_ADMIN_SETTINGS}` - both checked independently, not assuming one
+implies the other, the same discipline `App.jsx`'s other role-gated routes already established.
+
+**Verified live, full loop, as three different users**: as the Northgate Administrator, both
+sections rendered real seeded data (Company Profile fields, all 5 demo users with roles) with
+her own row correctly marked "(you)" and its Deactivate button disabled with the explanatory
+title. Added a real new teammate (Inspector role, a real password) - toast shown, row appeared
+sorted into the table - then confirmed via a real `curl` login that the new account actually
+works, not just that the API returned 201. Edited that user's role (Inspector→Manager) - table
+updated. Deactivated them - status flipped to Inactive, button flipped to Reactivate - then
+confirmed via a second real `curl` login attempt that a deactivated account is genuinely
+rejected (`"Incorrect email or password."`, the same generic message every login failure
+mode gives, per Phase 5's account-enumeration decision). Edited the Company Profile's Telephone
+field - toast shown, persisted on reload. Logged in as a Manager: the Admin Settings link was
+correctly ABSENT from the sidebar, and direct navigation to `/admin-settings` redirected to the
+real Unauthorized page (403), not silently rendered. Logged in as the Bright Spaces
+Administrator: both sections showed ONLY that company's own data (a different Company Profile,
+a team roster of exactly one, her own account) - full cross-company isolation confirmed on both
+new endpoint families in one session. All test data (the created teammate account, the Company
+Telephone edit) cleaned up/restored afterward.
+
+**Only the Risk Matrix configuration screen remains from Phase 16's own named page list** -
+`RiskMatrixLevels` create/edit, deliberately deferred from the Risk Register module's own pass
+(scope §19's "the exact risk matrix should remain configurable" is real but was treated as a
+secondary feature at the time, not silently dropped).
