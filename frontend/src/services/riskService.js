@@ -1,22 +1,68 @@
 /**
- * Wraps /api/risk-assessments and /api/risk-matrix-levels - see app/api/risk.py. createRiskAssessment
- * is Sub-phase C's quick-create modal; getRiskMatrix is Sub-phase F's Review screen (its
- * `LevelName`s - e.g. "Low"/"Medium"/"High"/"Critical" from the seeded global default - populate
- * the OverallRiskRating select, matching app/schemas/inspection.py's own reasoning: an
- * inspector's overall rating should use the same vocabulary their company's configurable matrix
- * does, not a hardcoded list). The full Risk Register module is one of Phase 16's remaining
- * pages, not built yet.
+ * Wraps /api/risk-assessments and /api/risk-matrix-levels - see app/api/risk.py.
+ * createRiskAssessment started as Sub-phase C's quick-create modal (only InspectionResponseId/
+ * Hazard/Likelihood/Severity/Notes) and is generalized here to the full RiskAssessmentCreate
+ * field set for the standalone Risk Register's own create form - existing callers passing only
+ * the original fields are unaffected, since every new parameter is optional. getRiskMatrix was
+ * Sub-phase F's Review screen; it's this module's own reference data too (RiskLevel options and
+ * badge context both come from it, not a hardcoded list).
  */
 import { apiClient } from "../api/client";
 
-export async function createRiskAssessment({ inspectionResponseId, hazard, likelihood, severity, notes }) {
+export async function createRiskAssessment({
+  propertyId,
+  inspectionResponseId,
+  location,
+  hazard,
+  whoMayBeAffected,
+  existingControls,
+  likelihood,
+  severity,
+  additionalActionRequired,
+  responsiblePersonUserId,
+  targetCompletionDate,
+  notes,
+}) {
   const { data } = await apiClient.post("/risk-assessments", {
-    InspectionResponseId: inspectionResponseId,
+    PropertyId: propertyId || undefined,
+    InspectionResponseId: inspectionResponseId || undefined,
+    Location: location || undefined,
     Hazard: hazard,
+    WhoMayBeAffected: whoMayBeAffected || undefined,
+    ExistingControls: existingControls || undefined,
     Likelihood: likelihood,
     Severity: severity,
+    AdditionalActionRequired: additionalActionRequired || undefined,
+    ResponsiblePersonUserId: responsiblePersonUserId || undefined,
+    TargetCompletionDate: targetCompletionDate || undefined,
     Notes: notes || undefined,
   });
+  return data; // RiskAssessmentResponse
+}
+
+export async function listRiskAssessments({ page = 1, pageSize = 20, status, riskLevel, propertyId } = {}) {
+  const { data } = await apiClient.get("/risk-assessments", {
+    params: {
+      page,
+      page_size: pageSize,
+      status: status || undefined,
+      risk_level: riskLevel || undefined,
+      property_id: propertyId || undefined,
+    },
+  });
+  return data; // PaginatedResponse<RiskAssessmentResponse>
+}
+
+export async function getRiskAssessment(riskAssessmentId) {
+  const { data } = await apiClient.get(`/risk-assessments/${riskAssessmentId}`);
+  return data; // RiskAssessmentResponse
+}
+
+/** Administrator/Manager only - ONE combined PATCH covering every field including Status/
+ * ResponsiblePersonUserId/TargetCompletionDate (app/schemas/risk_assessment.py's own
+ * RiskAssessmentUpdate - no separate assign/status endpoints the way Maintenance has). */
+export async function updateRiskAssessment(riskAssessmentId, payload) {
+  const { data } = await apiClient.patch(`/risk-assessments/${riskAssessmentId}`, payload);
   return data; // RiskAssessmentResponse
 }
 

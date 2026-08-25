@@ -15,3 +15,10 @@ export const SEVERITY_OPTIONS = [
   { value: "4", label: "4 - Major" },
   { value: "5", label: "5 - Severe" },
 ];
+
+/** Mirrors app/schemas/enums.py's RiskAssessmentStatus exactly. */
+export const RISK_ASSESSMENT_STATUS_OPTIONS = [
+  { value: "Open", label: "Open" },
+  { value: "ActionPlanned", label: "Action Planned" },
+  { value: "Closed", label: "Closed" },
+];

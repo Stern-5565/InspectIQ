@@ -33,6 +33,11 @@ const TONE_BY_STATUS = {
   high: "warning",
   medium: "info",
   low: "neutral",
+  // Risk Register (RiskLevel names come from each company's own configurable matrix, but the
+  // seeded global default and every demo company use these four - falls back to neutral for
+  // any company-specific name that doesn't match)
+  critical: "danger",
+  actionplanned: "warning",
 };
 
 export function StatusBadge({ status, tone }) {

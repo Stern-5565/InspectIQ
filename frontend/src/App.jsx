@@ -38,6 +38,15 @@
  * `MaintenanceIssueDetailPage` computes itself, the same pattern as `InspectionWizardLayout`. No
  * `/maintenance-issues/new` route exists - scope §17 frames issue creation entirely as the
  * wizard's job (Sub-phase C's quick-create), not a standalone flow this module adds.
+ *
+ * Risk Register: view (list/detail) has no role restriction. `/risk-assessments/new` IS a real
+ * route here, unlike Maintenance - scope §19 doesn't frame risk creation as inspection-only, and
+ * the backend already supports a standalone, non-inspection-linked entry - gated to
+ * `CAN_CONDUCT_INSPECTIONS` (the same "raise a problem" tier as Maintenance's own create).
+ * `/risk-assessments/:id/edit` is gated to `CAN_MANAGE_RISK` - unlike Maintenance, there's no
+ * per-record carve-out at all (confirmed by reading risk_service.py: the one combined PATCH is
+ * Administrator/Manager only, full stop), so a static role-gated route is sufficient here with
+ * no extra per-record computation needed on the page itself.
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -62,7 +71,15 @@ import { InspectionReviewPage } from "./pages/inspections/InspectionReviewPage";
 import { MaintenanceIssuesListPage } from "./pages/maintenance/MaintenanceIssuesListPage";
 import { MaintenanceIssueDetailPage } from "./pages/maintenance/MaintenanceIssueDetailPage";
 import { MaintenanceIssueFormPage } from "./pages/maintenance/MaintenanceIssueFormPage";
-import { CAN_MANAGE_PROPERTIES, CAN_CONDUCT_INSPECTIONS, CAN_MANAGE_MAINTENANCE } from "./constants/roles";
+import { RiskAssessmentsListPage } from "./pages/risk/RiskAssessmentsListPage";
+import { RiskAssessmentDetailPage } from "./pages/risk/RiskAssessmentDetailPage";
+import { RiskAssessmentFormPage } from "./pages/risk/RiskAssessmentFormPage";
+import {
+  CAN_MANAGE_PROPERTIES,
+  CAN_CONDUCT_INSPECTIONS,
+  CAN_MANAGE_MAINTENANCE,
+  CAN_MANAGE_RISK,
+} from "./constants/roles";
 
 export function App() {
   return (
@@ -105,6 +122,17 @@ export function App() {
 
                 <Route element={<ProtectedRoute allowedRoles={CAN_MANAGE_MAINTENANCE} />}>
                   <Route path="/maintenance-issues/:id/edit" element={<MaintenanceIssueFormPage />} />
+                </Route>
+
+                <Route path="/risk-assessments" element={<RiskAssessmentsListPage />} />
+                <Route path="/risk-assessments/:id" element={<RiskAssessmentDetailPage />} />
+
+                <Route element={<ProtectedRoute allowedRoles={CAN_CONDUCT_INSPECTIONS} />}>
+                  <Route path="/risk-assessments/new" element={<RiskAssessmentFormPage />} />
+                </Route>
+
+                <Route element={<ProtectedRoute allowedRoles={CAN_MANAGE_RISK} />}>
+                  <Route path="/risk-assessments/:id/edit" element={<RiskAssessmentFormPage />} />
                 </Route>
               </Route>
             </Route>

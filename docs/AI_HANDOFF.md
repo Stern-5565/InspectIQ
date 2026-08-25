@@ -1080,9 +1080,56 @@ Current status. Overwrite/update this file at the end of every session or phase 
     Detail. All test data (the issue, its timeline, both media rows, and both files on disk)
     cleaned up from the real DB and disk afterward.
 
+- **Phase 16 continued — the standalone Risk Register module (list/detail/create/edit)
+  complete.** The second of Phase 16's remaining standalone modules, and noticeably simpler than
+  Maintenance's - two static role tiers, no per-record assignee carve-out, no timeline table. No
+  backend changes needed this time - unlike Maintenance's `GET /api/users` and Sub-phase D's
+  `inspection_response_id` filter, the existing API surface already supported everything this
+  module needed.
+  - `pages/risk/RiskAssessmentsListPage.jsx`, `RiskAssessmentDetailPage.jsx`, and a genuinely
+    dual-mode `RiskAssessmentFormPage.jsx` (`isEdit = id !== undefined`, mirroring
+    `PropertyFormPage.jsx`'s shape) - `services/riskService.js`'s `createRiskAssessment` was
+    generalized from Sub-phase C's five quick-create fields to the full `RiskAssessmentCreate`
+    set (existing callers unaffected, every new param is optional), plus new
+    `listRiskAssessments`/`getRiskAssessment`/`updateRiskAssessment`.
+  - **A deliberate difference from Maintenance, not an inconsistency**: `/risk-assessments/new`
+    IS a real route (`CAN_CONDUCT_INSPECTIONS`-gated, reusing the existing constant - no new one
+    needed). Scope §19 doesn't frame risk creation as inspection-only the way §17 explicitly
+    does for Maintenance ("from any inspection question"), and the backend's own
+    `RiskAssessmentCreate` already supports a standalone, `PropertyId`-only entry - a genuine
+    Risk Register use case (a manager logging a hazard noticed outside any inspection), not
+    scope creep.
+  - **Two tiers, confirmed independently by reading `risk_service.py` before assuming
+    Maintenance's shape applied**: `canManage` (Administrator/Manager, new `CAN_MANAGE_RISK`)
+    gates the Edit link - the ONE combined PATCH covering every field including Status/
+    ResponsiblePersonUserId, with NO per-record carve-out at all (being the
+    `ResponsiblePersonUserId` does not grant edit rights, unlike Maintenance's `AssignedUserId`
+    tier) - so `/risk-assessments/:id/edit` is a plain role-gated route, no per-record
+    computation needed on the page itself, unlike Maintenance's `canWork`.
+  - **A third, genuinely different tier for Photos specifically, confirmed by reading
+    `media_service.py`**: RiskAssessment's media mutate check is the SAME as its view check (any
+    company member) - matching Property/Unit's "uploading evidence is broader than editing the
+    record" shape, not Maintenance's `ensure_can_edit`-gated one. `MediaAttachments` gets
+    `editable={true}` unconditionally on this page - verified live with a real Viewer login
+    successfully uploading a photo to a record they have no other access to modify.
+  - `StatusBadge`'s shared tone map gained `critical`/`actionplanned` (RiskLevel/Status values) -
+    grown incrementally again, same as Maintenance's addition.
+  - **Verified live, across three different users**: created a real risk assessment as an
+    Inspector (Likelihood=4/Severity=5 → confirmed `RiskScore=20`/`RiskLevel=Critical`, matching
+    scope's own worked example) → that same Inspector successfully uploaded a photo (no Edit
+    link shown, correctly gated) → an Administrator edited it (Severity→2, Status→ActionPlanned,
+    assigned a Responsible person) → confirmed `RiskLevel` was RE-derived to `Medium` (4×2=8,
+    the 5-9 band) and the toast/resolved name both appeared correctly → a cross-company
+    Administrator got a real 404 → a Viewer saw a fully read-only detail page EXCEPT the photo
+    upload control, which correctly still worked (confirmed with a real successful upload,
+    proving the "media mutate = view" rule holds even for the most restricted role). No mobile
+    overflow. All test data (the risk assessment and both media rows/files) cleaned up
+    afterward.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (the Maintenance module) to git is the next action.
+- Nothing in progress. Committing this batch (the Risk Register module) to git is the next
+  action.
 
 ## Important decisions
 
@@ -1251,19 +1298,28 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
      picker. See the "What has been completed" entry above for the full detail, including two
      real bugs found and fixed during live verification (a stale Timeline after photo upload,
      and a missing Edit-success toast).
-   - **Remaining, per Prompt 16's own page list**: Risk Register (list/detail, matrix config
-     UI), Cleaning (areas config, grading history), Vacant Units (list/detail), Meter Readings
-     (list/detail), Admin Settings. The wizard's quick-create modals (Sub-phases C/D/E) let an
-     inspector CREATE a RiskAssessment/MeterReading/VacantUnitInspection/CleaningInspection from
-     inside an inspection, the same gap Maintenance had - there's still no page anywhere in the
-     app to browse, filter, or manage those records afterward. No order has been decided for
-     these yet - an open decision for a future session, not something 2026-08-25's planning
-     session covered (it only approved the wizard's own six sub-phases).
-   - A pattern worth reusing across all of these, confirmed twice now (Maintenance's `GET /api/
-     users`, Sub-phase D's `inspection_response_id` filter): read the relevant `_service.py`
-     file's authorization logic BEFORE designing each module's frontend gating, and check
-     whether the existing API surface actually supports what a management page needs (a
-     picker, a filter) before assuming it does.
+   - **Risk Register — DONE** (commit pending as of this writing) - list/detail/create/edit,
+     including a standalone create form (a deliberate difference from Maintenance - see the
+     "What has been completed" entry above for why). No backend changes needed this time. Two
+     tiers (`canManage` for Edit, unconditional `editable` for Photos - a genuinely different,
+     independently-confirmed rule from Maintenance's).
+   - **Remaining, per Prompt 16's own page list**: Cleaning (areas config, grading history),
+     Vacant Units (list/detail), Meter Readings (list/detail), Admin Settings, and a Risk Matrix
+     configuration screen (create/edit `RiskMatrixLevels` - scope §19's "the exact risk matrix
+     should remain configurable," deliberately deferred from this pass as a secondary feature
+     relative to the main Risk Register CRUD, not silently dropped). The wizard's quick-create
+     modals (Sub-phases D/E) let an inspector CREATE a MeterReading/VacantUnitInspection/
+     CleaningInspection from inside an inspection, the same gap Maintenance/Risk had - there's
+     still no page anywhere in the app to browse, filter, or manage those records afterward. No
+     order has been decided for these yet - an open decision for a future session, not something
+     2026-08-25's planning session covered (it only approved the wizard's own six sub-phases).
+   - A pattern worth reusing across all of these, confirmed multiple times now (Maintenance's
+     `GET /api/users`, Sub-phase D's `inspection_response_id` filter, and Risk Register
+     confirming the OPPOSITE - that sometimes the existing API surface already IS enough): read
+     the relevant `_service.py` file's authorization logic BEFORE designing each module's
+     frontend gating, and check whether the existing API surface actually supports what a
+     management page needs (a picker, a filter) before assuming it does either way - don't
+     assume a gap exists any more than assuming one doesn't.
 
 ## Files that require attention
 

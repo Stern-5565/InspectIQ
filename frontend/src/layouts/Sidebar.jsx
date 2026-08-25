@@ -1,6 +1,6 @@
 /**
  * Nav list only - grows one <NavLink> per module as each module's frontend gets built
- * (Dashboard, Properties, Inspection Templates, Inspections, Maintenance so far). Mobile-first: collapsed
+ * (Dashboard, Properties, Inspection Templates, Inspections, Maintenance, Risk Register so far). Mobile-first: collapsed
  * off-canvas by default below the desktop breakpoint, toggled by Header's hamburger button (see
  * MainLayout's `sidebarOpen` state) - always visible on wider viewports regardless of that
  * state (styles/global.css). None of these links carry a role gate here even though managing a
@@ -29,6 +29,9 @@ export function Sidebar({ open, onNavigate }) {
         </NavLink>
         <NavLink to="/maintenance-issues" className="sidebar__link" onClick={onNavigate}>
           Maintenance
+        </NavLink>
+        <NavLink to="/risk-assessments" className="sidebar__link" onClick={onNavigate}>
+          Risk Register
         </NavLink>
       </nav>
     </>

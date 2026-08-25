@@ -1658,3 +1658,67 @@ authorization logic AND check whether the existing API surface actually supports
 management page needs (a lookup, a filter, a picker) BEFORE designing that page's frontend - both
 times this session, the answer was "not quite," and the gap was small and worth closing properly
 rather than working around client-side.
+
+## 2026-08-25 — Risk Register module built: simpler than Maintenance, and correctly so, not by accident
+
+Asked to continue with the next standalone Phase 16 module after Maintenance; picked Risk
+Register. Built list/detail/create/edit (`pages/risk/`) - genuinely simpler than Maintenance
+(two static role tiers, no timeline table, no per-record assignee carve-out), confirmed by
+reading `risk_service.py` in full before assuming either Maintenance's three-tier shape or its
+own prior two-tier precedent (Cleaning/VacantUnit) applied here unmodified - it doesn't; this
+module's own docstring re-derives its shape from first principles, the same discipline every
+prior module in this project has used.
+
+**No backend addition needed this time** - a genuine, useful data point, not just "nothing to
+report": the existing `/api/risk-assessments` and `/api/risk-matrix-levels` surface already
+covered everything the frontend needed (list filters, a matrix reference for RiskLevel options).
+Confirms the standing lesson cuts both ways - checking whether a gap exists is real work
+regardless of which answer it turns up, not a formality that always finds something to add.
+
+**A deliberate, considered difference from Maintenance's precedent, not an inconsistency**:
+`/risk-assessments/new` is a real standalone route (unlike Maintenance, which has none).
+Re-checked scope §19's actual wording rather than assuming Maintenance's "creation is
+wizard-only" pattern generalizes - §19 lists "Property, Inspection" as fields without ever
+saying risk assessments can ONLY be raised from an inspection question the way §17 explicitly
+says for Maintenance ("An inspector should be able to create a maintenance issue from any
+inspection question"), and the backend's own `RiskAssessmentCreate` already supports a
+standalone, non-inspection-linked entry with no code changes needed to enable it - a genuine
+Risk Register use case (a manager logging a hazard noticed on a site visit, not during a formal
+inspection), not scope creep invented to have something to build. `createRiskAssessment` in
+`riskService.js` was generalized from Sub-phase C's five-field quick-create shape to the full
+`RiskAssessmentCreate` field set - confirmed the original quick-create modal (Sub-phase C) still
+works unchanged, since every new parameter is optional and the original five keep their names.
+
+**A THIRD distinct authorization tier, confirmed by reading `media_service.py` rather than
+copying Maintenance's Photos gating** (`canWork`-style, `ensure_can_edit`-based): RiskAssessment's
+media mutate check is the SAME function as its view check - any company member, full stop, no
+role or per-record gate at all. This was already documented from Phase 13 (memory:
+"RiskAssessment's media mutate check is the SAME as its view check") but re-verified against the
+actual `media_service.py` source rather than trusted from memory alone, then proven with a real
+end-to-end test: a Viewer login - the single most restricted role in this entire project -
+successfully uploaded a real photo to a risk assessment they have no other access to modify at
+all (no Edit link, 403 on any hypothetical PATCH). `MediaAttachments` on this page gets
+`editable={true}` unconditionally, not wired to `canManage` the way it would be if this module's
+shape had been assumed rather than checked.
+
+**Verified live, across three different real users, on one real risk assessment**: created as an
+Inspector using scope §19's own worked example (Likelihood=4, Severity=5) - confirmed
+`RiskScore=20`/`RiskLevel=Critical` matched exactly, no Edit link shown (correct - Inspector
+isn't in `CAN_MANAGE_RISK`), successfully uploaded a photo anyway (the third-tier rule, exercised
+by the actual creator this time, not just a Viewer). An Administrator then edited it - changed
+Severity to 2 and Status to "ActionPlanned," assigned a Responsible person - confirmed
+`RiskLevel` was RE-derived server-side to "Medium" (4×2=8, correctly landing in the 5-9 band,
+not left stale at "Critical"), the resolved Responsible-person name appeared correctly, and the
+edit-success toast worked (this module built the `location.state?.toast` pattern correctly from
+the start, unlike Maintenance's initial miss - the lesson from that bug was already internalized
+by the time this page was written, not just recorded). A cross-company Administrator got a real
+404. A Viewer saw a fully read-only page except the still-functional photo upload (the third
+tier, confirmed a second way). No horizontal overflow at 375px. All test data (the risk
+assessment and both media rows/files) cleaned up afterward.
+
+**A pattern now confirmed to cut both ways, worth carrying forward explicitly**: this session's
+standing lesson about checking the backend before designing a frontend isn't just "expect to
+find a gap and add an endpoint" (Maintenance's `GET /api/users`, Sub-phase D's `inspection_
+response_id` filter) - sometimes the honest answer, arrived at by the same checking process, is
+that nothing needs to be added at all (this module). The value is in doing the check every time,
+not in the check always producing the same kind of result.

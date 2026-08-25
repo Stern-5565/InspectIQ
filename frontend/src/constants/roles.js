@@ -46,3 +46,14 @@ export const CAN_CONDUCT_INSPECTIONS = [ADMINISTRATOR, MANAGER, INSPECTOR];
 // `user.UserId === issue.AssignedUserId` OR CAN_MANAGE_MAINTENANCE, the same pattern
 // InspectionWizardLayout.jsx already established for `canEdit`.
 export const CAN_MANAGE_MAINTENANCE = [ADMINISTRATOR, MANAGER];
+
+// Risk Register: viewing (list/get, RiskMatrixLevels included) has no role restriction. Create
+// is CAN_CONDUCT_INSPECTIONS (identifying a hazard is the same "raise a problem" tier
+// Maintenance's create uses - app/services/risk_service.py's own module docstring), so no
+// separate constant is needed for it - reuse CAN_CONDUCT_INSPECTIONS directly. Update (EVERY
+// field, including Status/ResponsiblePersonUserId, in one combined PATCH - there's no
+// Maintenance-style three-tier split here, since RiskAssessment.InspectionId is nullable and
+// scope §19 names no audit-trail requirement) is Administrator/Manager only, a static role gate
+// with no per-record carve-out - unlike Maintenance's `canWork`, nobody else can edit a risk
+// assessment just by being its ResponsiblePersonUserId.
+export const CAN_MANAGE_RISK = [ADMINISTRATOR, MANAGER];
