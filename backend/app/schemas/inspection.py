@@ -3,6 +3,10 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Aliased on import - see app/schemas/property.py's header comment for why (Python 3.14's lazy
+# annotation evaluation shadows a module-level import with a same-named class attribute).
+from app.schemas.enums import OverallCondition as OverallConditionEnum
+
 
 class InspectionCreate(BaseModel):
     PropertyId: int
@@ -13,6 +17,26 @@ class InspectionCreate(BaseModel):
     # Deliberately no InspectorUserId field - starting an inspection always self-assigns to
     # the authenticated user (app/services/inspection_service.py). No "assign to someone else"
     # flow exists yet (that's scope §24's inspection-scheduling territory, not this phase).
+
+
+class InspectionUpdate(BaseModel):
+    """PATCH semantics - only supplied fields change. Covers the three inspector-level summary
+    fields that exist on the Inspection record itself (not a per-question InspectionResponse):
+    an overall subjective judgment call, separate from the per-question answers, and freeform
+    general notes about the visit as a whole. Added specifically for the Inspection Review
+    screen (Prompt 17) - until this endpoint existed, GeneralNotes/OverallCondition/
+    OverallRiskRating were readable on InspectionDetailResponse but had no way to ever be set.
+
+    OverallRiskRating is deliberately plain `str`, not an enum, unlike OverallCondition (which
+    has a real DB CHECK constraint, 09_Constraints.sql) - RiskAssessments' own risk-level names
+    come from each company's configurable RiskMatrixLevels (Phase 13), not a fixed set, so an
+    inspector's overall rating should be free to use the same vocabulary their company's matrix
+    does rather than a hardcoded list this schema would have to keep in sync with configuration.
+    """
+
+    GeneralNotes: str | None = None
+    OverallCondition: OverallConditionEnum | None = None
+    OverallRiskRating: str | None = Field(default=None, max_length=30)
 
 
 class InspectionResponseUpdate(BaseModel):

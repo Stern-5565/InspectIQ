@@ -1158,3 +1158,58 @@ explore locally) was still up on port 5173 outside the preview tool's own proces
 process it doesn't own), so verification connected to it directly via `preview_start` with a
 plain `url`, the same way any already-running external server is used, rather than restarting
 anything the owner might still have been using.
+
+## 2026-08-25 — Inspection engine wizard planned (Phase 16 continued)
+
+Before writing any code, the owner asked to talk through the design - the right call, since
+Prompt 17 itself calls this "the most important screen in the application" and it's a
+genuinely different shape from every module built so far (List/Detail/Form doesn't apply; it's
+a stateful multi-step flow touching five backend modules at once).
+
+**A real discovery that shaped the whole plan, not assumed**: reading
+`database/seed/12_SeedInspectionTemplate.sql`'s own file header surfaced that five sections
+(Communal Cleaning, Units, Vacant Units, Maintenance, Risk Assessment) were deliberately built
+as "gateway" sections back in Phase 2 - they carry almost no real checklist questions because
+their substance lives in dedicated tables/flows (`CleaningInspections`, `VacantUnitInspections`,
+`MaintenanceIssues`/`RiskAssessments` "creatable from any question"). Confirmed by reading the
+actual seeded question text: "All identified vacant units inspected using Add Empty Unit?" is
+literally a confirmation prompt, not a real checklist item. This meant the wizard does NOT need
+to loop through units/cleaning-areas as regular questions - it needs two GLOBAL quick-actions
+("Add Empty Unit," "Grade Cleaning Area") available throughout the inspection, separate from the
+per-question actions (Photo/Video/Create Maintenance/Create Risk) scope names for every
+question. Finding this in the backend's own design comments, rather than guessing from the
+scope text alone, is what let the sub-phase plan (see `AI_HANDOFF.md`'s "Next tasks") separate
+"per-question actions" (C) from "global gateway actions" (E) as genuinely different kinds of
+work instead of conflating them.
+
+**A second real gap found while planning, not while building**: `GeneralNotes`/
+`OverallCondition`/`OverallRiskRating` exist on `Inspection`/`InspectionDetailResponse` (Phase
+8) but had no endpoint to ever set them - the Inspection Review screen (sub-phase F) would have
+had nothing to actually do with those fields otherwise. The owner chose to fix this now (a small,
+well-scoped `PATCH /api/inspections/{id}` addition, see the Phase 16 handoff entry above) rather
+than defer it - the right call, since discovering it later mid-Review-page-build would mean
+either a mid-task backend detour or shipping a Review screen that silently can't do what it's
+for.
+
+**Three concrete decisions confirmed with the owner, not decided unilaterally**: (1) add the
+`PATCH /api/inspections/{id}` endpoint now; (2) `Condition`-type answers render as curated
+preset buttons (Good/Fair/Poor) despite the backend leaving the field genuinely freeform -
+optimizes for the "few taps as possible" requirement scope states explicitly, at the cost of a
+frontend-only vocabulary the backend doesn't enforce (still just plain text once submitted, so
+this doesn't foreclose a different value ever being sent); (3) the six-sub-phase build order
+(A: core wizard → B: photos → C: maintenance/risk quick-create → D: meter reading → E: gateway
+actions → F: review/submit), each independently committable, rather than attempting the whole
+wizard as one page.
+
+**Explicitly out of scope for this entire effort**: "Inspection Report" (PDF) - scope names it
+as its own page, but it depends on backend Phase 17 ("PDF reports," `PROJECT_PLAN.md §11`),
+which doesn't exist. Submit is as far as sub-phase F goes; report generation is a distinct,
+later backend-then-frontend phase.
+
+**"Failed" status badge design, decided while planning rather than left ambiguous for
+implementation time**: only `PassFail` answers with `AnswerText === "Fail"` get the Failed
+badge - the one answer type with a real, DB-enforced (well, service-enforced -
+`_VALID_PASSFAIL` in `inspection_service.py`) failure value. `Condition`'s freeform values
+(even the "Poor"/"Fair"/"Good" preset from decision #2 above) deliberately do NOT drive a
+Failed badge - that would mean inventing a "Poor means failed" rule that exists only in this
+frontend's own preset button labels, not anywhere the backend actually defines or enforces it.

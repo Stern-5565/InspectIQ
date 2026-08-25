@@ -391,6 +391,103 @@ def test_cannot_edit_a_response_after_submission(
         _delete_inspection(db_session, body["InspectionId"])
 
 
+# --- update inspection (summary fields) -------------------------------------------------------
+
+def test_update_inspection_sets_summary_fields(
+    client: TestClient, db_session: Session, northgate_inspector, northgate_property_id: int, template_id: int
+) -> None:
+    headers = auth_headers(client, northgate_inspector.Email)
+    body = _start_inspection(client, headers, northgate_property_id, template_id)
+
+    try:
+        response = client.patch(
+            f"/api/inspections/{body['InspectionId']}",
+            json={
+                "GeneralNotes": "Quiet visit, tenant was cooperative.",
+                "OverallCondition": "Satisfactory",
+                "OverallRiskRating": "Low",
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200
+        updated = response.json()
+        assert updated["GeneralNotes"] == "Quiet visit, tenant was cooperative."
+        assert updated["OverallCondition"] == "Satisfactory"
+        assert updated["OverallRiskRating"] == "Low"
+
+        # Re-fetch confirms it's actually persisted, not just echoed back.
+        refetched = client.get(f"/api/inspections/{body['InspectionId']}", headers=headers)
+        assert refetched.json()["OverallCondition"] == "Satisfactory"
+    finally:
+        _delete_inspection(db_session, body["InspectionId"])
+
+
+def test_update_inspection_rejects_invalid_overall_condition(
+    client: TestClient, db_session: Session, northgate_inspector, northgate_property_id: int, template_id: int
+) -> None:
+    headers = auth_headers(client, northgate_inspector.Email)
+    body = _start_inspection(client, headers, northgate_property_id, template_id)
+
+    try:
+        response = client.patch(
+            f"/api/inspections/{body['InspectionId']}",
+            json={"OverallCondition": "NotARealValue"},
+            headers=headers,
+        )
+        assert response.status_code == 422
+    finally:
+        _delete_inspection(db_session, body["InspectionId"])
+
+
+def test_update_inspection_by_a_different_inspector_returns_403(
+    client: TestClient,
+    db_session: Session,
+    northgate_inspector,
+    northgate_inspector2,
+    northgate_property_id: int,
+    template_id: int,
+) -> None:
+    owner_headers = auth_headers(client, northgate_inspector.Email)
+    body = _start_inspection(client, owner_headers, northgate_property_id, template_id)
+
+    try:
+        other_headers = auth_headers(client, northgate_inspector2.Email)
+        response = client.patch(
+            f"/api/inspections/{body['InspectionId']}",
+            json={"GeneralNotes": "Should not be allowed."},
+            headers=other_headers,
+        )
+        assert response.status_code == 403
+    finally:
+        _delete_inspection(db_session, body["InspectionId"])
+
+
+def test_cannot_update_inspection_summary_after_submission(
+    client: TestClient, db_session: Session, northgate_inspector, northgate_property_id: int, template_id: int
+) -> None:
+    headers = auth_headers(client, northgate_inspector.Email)
+    body = _start_inspection(client, headers, northgate_property_id, template_id)
+    all_responses = [r for section in body["Sections"] for r in section["Responses"]]
+
+    try:
+        for r in all_responses:
+            client.patch(
+                f"/api/inspections/{body['InspectionId']}/responses/{r['InspectionResponseId']}",
+                json={"IsNotApplicable": True},
+                headers=headers,
+            )
+        client.post(f"/api/inspections/{body['InspectionId']}/submit", headers=headers)
+
+        response = client.patch(
+            f"/api/inspections/{body['InspectionId']}",
+            json={"GeneralNotes": "Too late."},
+            headers=headers,
+        )
+        assert response.status_code == 409
+    finally:
+        _delete_inspection(db_session, body["InspectionId"])
+
+
 # --- isolation -----------------------------------------------------------------------------
 
 def test_get_inspection_belonging_to_another_company_returns_404(

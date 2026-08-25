@@ -122,3 +122,12 @@ class MeterType(str, Enum):
     ELECTRICITY = "Electricity"
     GAS = "Gas"
     WATER = "Water"
+
+
+class OverallCondition(str, Enum):
+    EXCELLENT = "Excellent"
+    GOOD = "Good"
+    SATISFACTORY = "Satisfactory"
+    NEEDS_ATTENTION = "NeedsAttention"
+    POOR = "Poor"
+    CRITICAL = "Critical"

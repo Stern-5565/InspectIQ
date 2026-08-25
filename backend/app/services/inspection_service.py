@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from enum import Enum
 
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,7 @@ from app.models.inspection_response import InspectionResponse
 from app.models.user import User
 from app.repositories import inspection_repository as repo
 from app.repositories import inspection_response_repository as response_repo
-from app.schemas.inspection import InspectionCreate, InspectionResponseUpdate
+from app.schemas.inspection import InspectionCreate, InspectionResponseUpdate, InspectionUpdate
 from app.security import roles
 from app.services import inspection_template_service, property_service
 
@@ -114,6 +115,28 @@ def get_inspection(db: Session, current_user: User, inspection_id: int) -> Inspe
     if inspection is None:
         raise NotFoundError("Inspection not found.")
     return inspection
+
+
+def update_inspection(
+    db: Session, current_user: User, inspection_id: int, payload: InspectionUpdate
+) -> Inspection:
+    """Sets the inspection-level summary fields (GeneralNotes/OverallCondition/
+    OverallRiskRating) - added for the Inspection Review screen (Prompt 17). Same
+    authorization and post-submission immutability rules as update_response: only the
+    assigned inspector or an Administrator/Manager, and never after Status becomes
+    "Submitted" (reports must represent the inspection exactly as it existed at submission,
+    scope §18)."""
+    inspection = get_inspection(db, current_user, inspection_id)
+    ensure_can_edit(current_user, inspection)
+
+    if inspection.Status == "Submitted":
+        raise ConflictError("Cannot modify a submitted inspection.")
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(inspection, field, value.value if isinstance(value, Enum) else value)
+
+    return repo.save_inspection(db, inspection)
 
 
 def _normalize_answer(response: InspectionResponse, payload: InspectionResponseUpdate) -> dict:

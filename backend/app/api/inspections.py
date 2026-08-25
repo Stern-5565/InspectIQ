@@ -17,6 +17,12 @@ Deliberately NOT built in this phase (scope Prompt 8 mentions them, but their ow
 exist yet): "Add photos/videos" (Phase 9), "Create maintenance issue from a response" (Phase
 10), "Create risk assessment from a response" (Phase 13). InspectionResponseId already exists
 as a stable FK target for all three once those modules arrive.
+
+`PATCH /{inspection_id}` (added during Phase 16 frontend work, not Phase 8) sets the
+inspection-level summary fields (GeneralNotes/OverallCondition/OverallRiskRating) - these
+existed on the model and in InspectionDetailResponse since Phase 8, but nothing let a client
+ever set them until the Inspection Review screen needed to. Same auth/immutability rules as
+`update_response` - see app/services/inspection_service.py's update_inspection.
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -29,6 +35,7 @@ from app.schemas.inspection import (
     InspectionResponseSchema,
     InspectionResponseUpdate,
     InspectionSummaryResponse,
+    InspectionUpdate,
 )
 from app.schemas.pagination import PaginatedResponse
 from app.security import roles
@@ -84,6 +91,19 @@ def get_inspection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> InspectionDetailResponse:
+    inspection = inspection_service.get_inspection(db, current_user, inspection_id)
+    completion = inspection_service.calculate_completion_percentage(inspection.responses)
+    return InspectionDetailResponse.from_inspection(inspection, completion)
+
+
+@router.patch("/{inspection_id}", response_model=InspectionDetailResponse)
+def update_inspection(
+    inspection_id: int,
+    payload: InspectionUpdate,
+    current_user: User = Depends(_conduct_inspections),
+    db: Session = Depends(get_db),
+) -> InspectionDetailResponse:
+    inspection_service.update_inspection(db, current_user, inspection_id, payload)
     inspection = inspection_service.get_inspection(db, current_user, inspection_id)
     completion = inspection_service.calculate_completion_percentage(inspection.responses)
     return InspectionDetailResponse.from_inspection(inspection, completion)

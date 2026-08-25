@@ -717,11 +717,32 @@ Current status. Overwrite/update this file at the end of every session or phase 
     types (`METERREADING`/`YESNO`/`CONDITION`) and flags, matching the actual seeded data exactly
     → confirmed every `/api/inspection-templates*` network call returned a real 200 → confirmed
     no page-level horizontal overflow at 375px mobile width.
+- **Backend addition: `PATCH /api/inspections/{id}`**, made during Phase 16 planning for the
+  Inspection Review screen, not Phase 8 - `GeneralNotes`/`OverallCondition`/`OverallRiskRating`
+  have existed on `Inspection`/`InspectionDetailResponse` since Phase 8, but nothing could ever
+  set them until Review needed to. Small, well-scoped: same auth (assigned inspector or
+  Administrator/Manager) and post-submission immutability rules as `update_response`.
+  - `app/schemas/enums.py` gained `OverallCondition` (Excellent/Good/Satisfactory/
+    NeedsAttention/Poor/Critical - mirrors the real `CK_Inspections_OverallCondition` CHECK
+    constraint that already existed in the DB since Phase 2, unused until now).
+    `OverallRiskRating` is deliberately plain `str`, not an enum - unlike `OverallCondition`, the
+    DB itself leaves it unconstrained, matching how `RiskAssessments`' own risk-level names come
+    from each company's configurable `RiskMatrixLevels` (Phase 13), not a fixed list.
+  - `app/schemas/inspection.py`'s new `InspectionUpdate`, `app/services/inspection_service.py`'s
+    new `update_inspection`, `app/api/inspections.py`'s new route - all following the exact
+    shape `update_response` already established.
+  - 4 new tests (128 total): sets and persists all three fields (re-fetched, not just echoed
+    back), an invalid `OverallCondition` value 422s, a different Inspector than the one assigned
+    gets 403, and the same 409-after-submission rule `update_response` already enforces.
+  - **Verified live**: a real Inspector's login → started a real inspection → `PATCH`'d all
+    three fields over actual HTTP → confirmed they came back correctly → confirmed an invalid
+    enum value still 422s → test inspection cleaned up.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Inspection Templates frontend module) to git is
-  the next action.
+- Nothing in progress. Committing this batch (the `PATCH /api/inspections/{id}` backend
+  addition) to git is the next action, before starting Sub-phase A of the Inspection engine
+  frontend.
 
 ## Important decisions
 
@@ -836,25 +857,48 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Inspection Templates frontend module) to git.
-2. **Phase 16 continues — the Inspection engine next** (Prompt 17's "most important screen in
-   the application" - a bespoke mobile wizard flow per `PROJECT_PLAN.md §6`/§7, NOT the
-   List/Detail/Form triad every module so far has used - worth reading `prompts/frontend_prompt.md`
-   in full and planning deliberately before starting it, not treating it as just another module).
-   It's the natural next module: Properties + Units + Inspection Templates are exactly the three
-   things starting an inspection needs to already exist and be navigable. After that: Maintenance,
-   Risk, Cleaning, Vacant Units, Meter Readings, Admin Settings - same incremental order the
-   backend itself followed, each with a proven List/Detail/Form template to follow now
-   (`services/xService.js`, `constants/roles.js` additions - `CAN_MANAGE_X`, and `CAN_VIEW_X`
-   only where the backend actually restricts viewing, which most modules don't - List/Detail/Form
-   pages built from the shared component library in `components/`, and a new nested
-   `<Route>`/`<ProtectedRoute allowedRoles={...}>` block in `App.jsx` plus a `Sidebar` link).
+1. Commit this batch (the `PATCH /api/inspections/{id}` backend addition) to git.
+2. **Phase 16 continues — the Inspection engine wizard**, Prompt 17's "most important screen in
+   the application," planned in detail with the owner on 2026-08-25 (see `docs/AI_MEMORY.md`'s
+   entry of that date for the full design discussion, including the "gateway sections"
+   discovery that shaped this). Deliberately staged into sub-phases rather than built as one
+   page, each independently committable and verifiable:
+   - **Sub-phase A (next, in progress)** — the core wizard: Inspection List
+     (`services/inspectionService.js`, reusing the `DataTable` pattern), Start Inspection (a
+     small property+template+date form), the Sections screen (header + tappable section list,
+     each showing its own completion %), and the Question screen (one question at a time,
+     Previous/Next, autosave via `PATCH .../responses/{id}`) for the five plain answer types
+     (`YesNo`/`PassFail`/`Condition`/`Text`/`Number`/`Date` - NOT `MeterReading`, deferred to D).
+     `Condition` renders as curated preset buttons (Good/Fair/Poor - owner's explicit choice,
+     2026-08-25), not a plain text field, even though the backend leaves it freeform. Status
+     badges: Answered/Unanswered (derived the same way `calculate_completion_percentage`
+     already does - answered or `IsNotApplicable`) and Failed (`AnswerTypeSnapshot === "PassFail"
+     && AnswerText === "Fail"` specifically - the only answer type with an unambiguous DB-backed
+     failure value; `Condition`'s freeform values get no such badge, since inventing a "Poor
+     means failed" rule the backend doesn't enforce would be guessing).
+   - **Sub-phase B** — Photo/Video per question (`POST /api/media`, `EntityType=
+     InspectionResponse`) - the frontend's first file-upload UI.
+   - **Sub-phase C** — Create Maintenance Issue / Create Risk quick-create modals per question
+     (minimal fields, `InspectionResponseId` supplied so the backend derives Property/Location
+     itself, same as every other creation path into those two modules).
+   - **Sub-phase D** — the `MeterReading` answer type's own flow (photo → mock OCR →
+     confirm/correct, wired to `/api/meter-readings`, not the generic response-update endpoint).
+   - **Sub-phase E** — the two global "gateway" quick-actions confirmed necessary by the seed
+     data's own design comment (`database/seed/12_SeedInspectionTemplate.sql`'s file header):
+     "Add Empty Unit" (`POST /api/inspections/{id}/vacant-unit-inspections` family) and "Grade
+     Cleaning Area" (`POST /api/inspections/{id}/cleaning`) - available throughout the
+     inspection, not tied to one question, since the gateway sections (Vacant Units, Communal
+     Cleaning) only ask the inspector to CONFIRM these were done elsewhere, not answer regular
+     checklist questions.
+   - **Sub-phase F** — Inspection Review (now genuinely useful thanks to the new
+     `PATCH /api/inspections/{id}` - lets the inspector set `OverallCondition`/
+     `OverallRiskRating`/`GeneralNotes` before submitting) and Submit. "Inspection Report" (PDF)
+     is explicitly OUT of scope for all of this - it depends on backend Phase 17
+     (`PROJECT_PLAN.md §11`'s phase table), which doesn't exist yet.
    - No further "pause for owner review" checkpoint is needed before continuing within Phase 16
-     itself - the owner already reviewed and approved starting Phase 16 (scaffold + auth), the
-     stack/architecture/shared-component choices are made and proven working end-to-end across
-     two full modules now, and the remaining work is incremental module-by-module frontend
-     building against an already-complete, already-tested backend, not a new undertaking
-     requiring fresh sign-off.
+     itself, or between these sub-phases - the owner already reviewed and approved the overall
+     plan (sub-phase order, the `Condition`-preset-buttons choice, and the
+     `PATCH /api/inspections/{id}` addition) on 2026-08-25.
 
 ## Files that require attention
 
