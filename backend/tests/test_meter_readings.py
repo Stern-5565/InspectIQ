@@ -348,6 +348,68 @@ def test_list_meter_readings(
         _delete_reading(db_session, meter_reading_id)
 
 
+def test_list_includes_property_name_and_null_inspection_id_for_standalone_reading(
+    client: TestClient, db_session: Session, northgate_admin, northgate_inspector, northgate_property_id: int
+) -> None:
+    """Standalone Meter Readings module's own need - PropertyName/InspectionId are added onto
+    the ALREADY company-wide list/detail routes (app/repositories/meter_reading_repository.py's
+    module docstring explains why no new routes were needed here, unlike Cleaning/VacantUnits).
+    A reading with no InspectionResponseId must show InspectionId=None, not a failed join."""
+    create = _create(client, auth_headers(client, northgate_inspector.Email), northgate_property_id)
+    meter_reading_id = create.json()["MeterReadingId"]
+
+    try:
+        listing = client.get(
+            "/api/meter-readings",
+            params={"property_id": northgate_property_id},
+            headers=auth_headers(client, northgate_admin.Email),
+        )
+        assert listing.status_code == 200
+        matches = [r for r in listing.json()["items"] if r["MeterReadingId"] == meter_reading_id]
+        assert len(matches) == 1
+        assert matches[0]["PropertyName"] == "15 High Road"
+        assert matches[0]["InspectionId"] is None
+
+        detail = client.get(
+            f"/api/meter-readings/{meter_reading_id}", headers=auth_headers(client, northgate_admin.Email)
+        )
+        assert detail.status_code == 200
+        assert detail.json()["PropertyName"] == "15 High Road"
+        assert detail.json()["InspectionId"] is None
+    finally:
+        _delete_reading(db_session, meter_reading_id)
+
+
+def test_detail_includes_resolved_inspection_id_for_linked_reading(
+    client: TestClient,
+    db_session: Session,
+    northgate_inspector,
+    northgate_property_id: int,
+    template_id: int,
+) -> None:
+    headers = auth_headers(client, northgate_inspector.Email)
+    start = client.post(
+        "/api/inspections",
+        json={"PropertyId": northgate_property_id, "InspectionTemplateId": template_id},
+        headers=headers,
+    )
+    inspection_id = start.json()["InspectionId"]
+    response_id = start.json()["Sections"][0]["Responses"][0]["InspectionResponseId"]
+
+    try:
+        create = _create(client, headers, northgate_property_id, inspection_response_id=response_id)
+        meter_reading_id = create.json()["MeterReadingId"]
+
+        detail = client.get(f"/api/meter-readings/{meter_reading_id}", headers=headers)
+        assert detail.status_code == 200
+        assert detail.json()["InspectionId"] == inspection_id
+        _delete_reading(db_session, meter_reading_id)
+    finally:
+        db_session.query(InspectionResponse).filter(InspectionResponse.InspectionId == inspection_id).delete()
+        db_session.query(Inspection).filter(Inspection.InspectionId == inspection_id).delete()
+        db_session.commit()
+
+
 def test_list_filtered_by_inspection_response_id(
     client: TestClient,
     db_session: Session,

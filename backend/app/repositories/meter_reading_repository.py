@@ -3,10 +3,18 @@
 MeterReadings has no CompanyId of its own, but PropertyId is NOT NULL and directly present
 (unlike Units/Inspections, which need a join to reach it or don't have it at all) - isolation is
 a single join to Properties, the simplest case of any module so far.
-"""
+
+Unlike Cleaning/VacantUnits, this module's list/detail queries were ALREADY company-wide since
+Phase 14 (MeterReadings was never nested under one Inspection the way CleaningInspections/
+VacantUnitInspections were) - so the standalone Phase 16 module needed no new ROUTES, just
+PropertyName/InspectionId joined onto the existing list/detail queries for display. InspectionId
+is reached via an OUTER join through InspectionResponses (MeterReading.InspectionResponseId is
+nullable - a standalone reading has no Inspection at all, so this is None for those rows, not a
+failed join)."""
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.inspection_response import InspectionResponse
 from app.models.meter_reading import MeterReading
 from app.models.property import Property
 
@@ -36,10 +44,18 @@ def list_meter_readings(
     property_id: int | None = None,
     meter_type: str | None = None,
     inspection_response_id: int | None = None,
-) -> tuple[list[MeterReading], int]:
+) -> tuple[list, int]:
+    """Returns (MeterReading, PropertyName, InspectionId) rows, not bare MeterReading - the
+    standalone module's list page needs both for display, and this is the ONLY caller of this
+    query (unlike get_meter_reading_by_id below, which several other services also call for a
+    bare ORM object), so enriching it in place is safe rather than adding a parallel function."""
     stmt = (
-        select(MeterReading)
+        select(MeterReading, Property.PropertyName, InspectionResponse.InspectionId)
         .join(Property, Property.PropertyId == MeterReading.PropertyId)
+        .outerjoin(
+            InspectionResponse,
+            InspectionResponse.InspectionResponseId == MeterReading.InspectionResponseId,
+        )
         .where(Property.CompanyId == company_id)
     )
     if property_id is not None:
@@ -56,9 +72,27 @@ def list_meter_readings(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    items = list(db.execute(stmt).scalars().all())
+    rows = list(db.execute(stmt).all())
 
-    return items, total
+    return rows, total
+
+
+def get_meter_reading_with_property_name(db: Session, company_id: int, meter_reading_id: int):
+    """The standalone module's own single-detail lookup - kept SEPARATE from
+    get_meter_reading_by_id above (which stays a bare MeterReading | None, since
+    meter_reading_service.get_meter_reading wraps it and several other services depend on that
+    exact shape: media_service's authorization dispatch, update_meter_reading's mutation).
+    Returns a (MeterReading, PropertyName, InspectionId) row, or None."""
+    stmt = (
+        select(MeterReading, Property.PropertyName, InspectionResponse.InspectionId)
+        .join(Property, Property.PropertyId == MeterReading.PropertyId)
+        .outerjoin(
+            InspectionResponse,
+            InspectionResponse.InspectionResponseId == MeterReading.InspectionResponseId,
+        )
+        .where(Property.CompanyId == company_id, MeterReading.MeterReadingId == meter_reading_id)
+    )
+    return db.execute(stmt).first()
 
 
 def save_meter_reading(db: Session, reading: MeterReading) -> MeterReading:

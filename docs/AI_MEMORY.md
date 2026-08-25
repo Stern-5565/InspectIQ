@@ -1838,3 +1838,62 @@ Phase 12's own test fixture has to account for).
 **Remaining Phase 16 pages, per `AI_HANDOFF.md`'s own list**: Meter Readings (list/detail),
 Admin Settings, and a Risk Matrix configuration screen. No order decided yet for a future
 session.
+
+## 2026-08-25 — Meter Readings module built: the "check first" habit paid off the opposite way this time, no new routes needed at all
+
+Fifth standalone Phase 16 module, and the first one where reading `meter_reading_repository.py`
+before assuming a Cleaning/VacantUnits-shaped gap existed turned up nothing to fix: `GET
+/meter-readings` (list) and `GET /meter-readings/{id}` (detail) were ALREADY company-wide since
+Phase 14 - `MeterReading` was never nested under one Inspection the way `CleaningInspection`/
+`VacantUnitInspection` were (it only ever had an optional `InspectionResponseId`), so a
+"show me every reading at this company" query already existed on day one. This is the Risk
+Register pattern repeating (the OPPOSITE of Cleaning/VacantUnits' missing-query gap), now
+confirmed a second time - there really is no default, the check has to happen every time.
+
+**The only real gap was display, not access**: neither route resolved `PropertyName`, and
+`MeterReading` has no `InspectionId` column at all (only the indirect `InspectionResponseId`,
+nullable). Rather than adding NEW parallel routes the way Cleaning/VacantUnits needed, enriched
+the EXISTING `list_meter_readings`/added `get_meter_reading_with_property_name` in
+`meter_reading_repository.py` with a `Property` join (for `PropertyName`) and an OUTER join
+through `InspectionResponse` (for `InspectionId` - outer because a standalone reading's
+`InspectionResponseId` is `None`, and that must surface as `InspectionId=None`, not a failed
+join). Kept `get_meter_reading_by_id`/`meter_reading_service.get_meter_reading` (the bare
+`MeterReading` ORM object) completely untouched - `media_service.py`'s authorization dispatch
+and `update_meter_reading` both depend on that exact shape, so the new enrichment went into a
+SEPARATE `get_meter_reading_detail` function instead of changing the existing one, the same
+"don't touch a function other things depend on" discipline as every prior module. The list
+route's `response_model` changing from `MeterReadingResponse` to the superset
+`MeterReadingSummaryResponse` is backward compatible with `MeterReadingControl.jsx`'s existing
+`listMeterReadings()` call (Sub-phase D) - the extra fields are simply fields JS already ignores.
+
+**A genuinely different `canConfirm` computation from every prior standalone detail page**,
+confirmed by rereading `meter_reading_service.py` rather than copying Cleaning/VacantUnits'
+`canEdit` shape verbatim: `ensure_can_edit_reading`'s hybrid tier (Inspection-linked reuses
+`ensure_can_edit`; standalone falls back to Admin/Manager-only) has NO
+`Inspection.Status == "Submitted"` lock at all, unlike every other per-record `canEdit`
+computed so far - confirmed by rereading `update_meter_reading` itself, which calls
+`ensure_can_edit_reading` and nothing else. `MeterReadingDetailPage.jsx`'s `canConfirm` was
+written to match that exactly (no submitted-check), not copied from the pattern that's applied
+everywhere else - a case where the "same lesson, different answer" instinct built on Vacant
+Units two sessions ago paid off in the other direction: this time the safe assumption WAS wrong.
+
+2 new backend tests (138 total): the standalone-reading case shows `PropertyName` with
+`InspectionId=None` on both list and detail, and the Inspection-linked case resolves the
+correct `InspectionId` on detail. Full suite reruns clean.
+
+**Verified live, full loop**: as Administrator, started a real inspection on "15 High Road" and
+used the EXISTING Electricity Meter question's `MeterReadingControl` (Sub-phase D, unmodified)
+to upload a photo - the mock OCR returned scope's own example value (`18294.6`/87% confidence,
+matching Phase 14's original verification exactly) - confirmed it appeared on the NEW
+company-wide list (`PropertyName` resolved, `Unconfirmed` badge) and NEW detail page (photo
+rendered as an authenticated blob, the same `MeterReadingControl.jsx` pattern, linked-inspection
+link present). Confirmed/corrected the reading from the standalone detail page (`18300.5`) -
+button label flipped to "Correct reading," list and detail both reflected the new value, badge
+flipped to `Confirmed`. A Bright Spaces Administrator got a real 404 on the detail URL and saw
+zero rows on the list - cross-company isolation confirmed on both. All test data (the
+inspection, its 102 responses, the meter reading, its media row and file) cleaned up afterward,
+respecting the FK order discovered live: `MeterReadings.PhotoMediaFileId` references
+`MediaFiles`, so the reading row must be deleted before its `MediaFile`, not after.
+
+**Remaining Phase 16 pages**: Admin Settings and a Risk Matrix configuration screen. No order
+decided yet for a future session.

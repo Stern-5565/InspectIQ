@@ -15,13 +15,21 @@ MeterReading answer type's Question screen needs to know whether a reading alrea
 THIS response (to show the confirm/correct UI instead of the initial capture-photo one), and
 InspectionResponseSchema carries no pointer back to a MeterReadingId (docs/DATABASE.md's ERD
 only points the other way, MeterReadings -> InspectionResponses).
+
+List/detail now return `MeterReadingSummaryResponse` (PropertyName/InspectionId added), for the
+standalone Phase 16 module's list/detail pages - a superset of `MeterReadingResponse`, so
+MeterReadingControl.jsx's existing `listMeterReadings()` calls are unaffected by the extra
+fields. Unlike Cleaning/VacantUnits, no NEW routes were needed here: this list/detail were
+ALREADY company-wide since Phase 14 (MeterReadings was never nested under one Inspection), so
+enriching the existing ones in place was enough - see
+app/repositories/meter_reading_repository.py's module docstring.
 """
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
 from app.models.user import User
-from app.schemas.meter_reading import MeterReadingResponse, MeterReadingUpdate
+from app.schemas.meter_reading import MeterReadingResponse, MeterReadingSummaryResponse, MeterReadingUpdate
 from app.schemas.pagination import PaginatedResponse
 from app.security import roles
 from app.security.dependencies import get_current_user, require_roles
@@ -56,7 +64,7 @@ def create_meter_reading(
     return MeterReadingResponse.model_validate(reading)
 
 
-@router.get("", response_model=PaginatedResponse[MeterReadingResponse])
+@router.get("", response_model=PaginatedResponse[MeterReadingSummaryResponse])
 def list_meter_readings(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -65,8 +73,8 @@ def list_meter_readings(
     inspection_response_id: int | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> PaginatedResponse[MeterReadingResponse]:
-    items, total = meter_reading_service.list_meter_readings(
+) -> PaginatedResponse[MeterReadingSummaryResponse]:
+    rows, total = meter_reading_service.list_meter_readings(
         db,
         current_user,
         page=page,
@@ -76,21 +84,23 @@ def list_meter_readings(
         inspection_response_id=inspection_response_id,
     )
     return PaginatedResponse(
-        items=[MeterReadingResponse.model_validate(r) for r in items],
+        items=[MeterReadingSummaryResponse.from_row(r, name, insp_id) for r, name, insp_id in rows],
         total=total,
         page=page,
         page_size=page_size,
     )
 
 
-@router.get("/{meter_reading_id}", response_model=MeterReadingResponse)
+@router.get("/{meter_reading_id}", response_model=MeterReadingSummaryResponse)
 def get_meter_reading(
     meter_reading_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> MeterReadingResponse:
-    reading = meter_reading_service.get_meter_reading(db, current_user, meter_reading_id)
-    return MeterReadingResponse.model_validate(reading)
+) -> MeterReadingSummaryResponse:
+    reading, property_name, inspection_id = meter_reading_service.get_meter_reading_detail(
+        db, current_user, meter_reading_id
+    )
+    return MeterReadingSummaryResponse.from_row(reading, property_name, inspection_id)
 
 
 @router.patch("/{meter_reading_id}", response_model=MeterReadingResponse)

@@ -149,7 +149,11 @@ def list_meter_readings(
     property_id: int | None = None,
     meter_type: str | None = None,
     inspection_response_id: int | None = None,
-) -> tuple[list[MeterReading], int]:
+) -> tuple[list, int]:
+    """Returns (MeterReading, PropertyName, InspectionId) rows - see
+    repo.list_meter_readings's own docstring for why enriching this in place (rather than adding
+    a parallel function, the way Cleaning/VacantUnits' company-wide queries had to) is safe here:
+    this was the ONLY caller of the underlying query even before the standalone module existed."""
     return repo.list_meter_readings(
         db,
         current_user.CompanyId,
@@ -166,6 +170,17 @@ def get_meter_reading(db: Session, current_user: User, meter_reading_id: int) ->
     if reading is None:
         raise NotFoundError("Meter reading not found.")
     return reading
+
+
+def get_meter_reading_detail(db: Session, current_user: User, meter_reading_id: int):
+    """The standalone module's own single-detail lookup, returning (MeterReading, PropertyName,
+    InspectionId) - kept SEPARATE from get_meter_reading above, which several other callers
+    (media_service's authorization dispatch, update_meter_reading's mutation) depend on
+    returning a bare MeterReading, not a tuple."""
+    row = repo.get_meter_reading_with_property_name(db, current_user.CompanyId, meter_reading_id)
+    if row is None:
+        raise NotFoundError("Meter reading not found.")
+    return row
 
 
 def update_meter_reading(

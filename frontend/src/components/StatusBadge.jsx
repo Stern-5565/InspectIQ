@@ -46,6 +46,10 @@ const TONE_BY_STATUS = {
   c: "warning",
   d: "warning",
   e: "danger",
+  // Meter Readings (a derived "Confirmed"/"Unconfirmed" label, not a real DB enum column -
+  // ConfirmedReading is just null-or-not on the record)
+  confirmed: "success",
+  unconfirmed: "warning",
 };
 
 export function StatusBadge({ status, tone }) {

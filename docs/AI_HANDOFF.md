@@ -1182,10 +1182,46 @@ Current status. Overwrite/update this file at the end of every session or phase 
     A cross-company Administrator got a real 404 on the new detail endpoint. No horizontal
     overflow at 375px on Areas, List, or Detail. All test data (the area, the inspection and its
     102 responses, the cleaning grade, its media row and file) cleaned up afterward.
+- **Phase 16 continued — the standalone Vacant Units module (list/detail/edit) complete.** The
+  fourth remaining standalone module, commit `06ab930`. Same gap as Cleaning found by the same
+  check (`vacant_unit_inspection_repository.py` had no company-wide query - every prior query was
+  scoped to one already-authorized Inspection): added `GET /vacant-unit-inspections` and
+  `.../{id}`, `VacantUnitInspectionSummaryResponse.from_row` (PropertyId/UnitNumber). **Confirmed,
+  not assumed, that no new authorization tier was needed** - the single tier Phase 12 already
+  established (parent Inspection's assigned inspector or Admin/Manager) governs both create (the
+  existing "Add Empty Unit" gateway action) and this module's update/photos, so
+  `VacantUnitInspectionDetailPage.jsx`'s `canEdit`/`MediaAttachments` wiring is a straight port of
+  `CleaningInspectionDetailPage.jsx`'s shape. 2 new tests (136 total). Verified live: created a
+  real finding via the existing gateway action, confirmed it on the new list/detail with resolved
+  names, edited it (partial PATCH left other fields untouched), a Bright Spaces admin got a real
+  404 on both new endpoints. Full detail in `docs/AI_MEMORY.md`'s 2026-08-25 entry.
+- **Phase 16 continued — the standalone Meter Readings module (list/detail/confirm) complete.**
+  The fifth remaining standalone module. Unlike Cleaning/VacantUnits, reading
+  `meter_reading_repository.py` first found NO routing gap at all - `GET /meter-readings` and
+  `.../{id}` were already company-wide since Phase 14 (MeterReading was never nested under one
+  Inspection). The only real gap was display: neither route resolved `PropertyName`, and
+  `MeterReading` has no `InspectionId` column (only the indirect, nullable
+  `InspectionResponseId`). Enriched the EXISTING `list_meter_readings` in place and added a
+  SEPARATE `get_meter_reading_with_property_name` (kept `get_meter_reading_by_id`/
+  `meter_reading_service.get_meter_reading` - the bare `MeterReading` several other callers
+  depend on - completely untouched), both joining `Property` for `PropertyName` and OUTER-joining
+  `InspectionResponse` for `InspectionId` (`None` for a standalone reading, not a failed join).
+  New `MeterReadingSummaryResponse(MeterReadingResponse)` via `from_row` - a superset, so
+  `MeterReadingControl.jsx`'s existing Sub-phase D calls are unaffected by the extra fields.
+  **A genuinely different `canConfirm` than every prior detail page**: `ensure_can_edit_reading`
+  has NO `Inspection.Status == "Submitted"` lock at all (confirmed by rereading
+  `update_meter_reading` - unlike Cleaning/VacantUnits' `canEdit`), so
+  `MeterReadingDetailPage.jsx`'s `canConfirm` deliberately omits that check too. 2 new tests (138
+  total). Verified live: uploaded a real photo via the existing Electricity Meter question - mock
+  OCR returned scope's own example (`18294.6`/87%) - confirmed on the new list/detail with
+  resolved `PropertyName` and the photo rendered as an authenticated blob, confirmed/corrected the
+  reading from the standalone detail page, cross-company 404 on both new endpoints. Full detail in
+  `docs/AI_MEMORY.md`'s 2026-08-25 entry.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (the Cleaning module) to git is the next action.
+- Nothing in progress. Committing this batch (the Meter Readings module) to git is the next
+  action.
 
 ## Important decisions
 
@@ -1300,34 +1336,34 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (standalone Vacant Units module) to git.
+1. Commit this batch (standalone Meter Readings module) to git.
 2. **The Inspection engine wizard (Prompt 17, all six sub-phases A-F) and Phase 16's Maintenance,
-   Risk Register, Cleaning, and Vacant Units standalone modules are all DONE and committed** (see
-   the "What has been completed" section above for each one's own detail, and
+   Risk Register, Cleaning, Vacant Units, and Meter Readings standalone modules are all DONE and
+   committed** (see the "What has been completed" section above for each one's own detail, and
    `docs/AI_MEMORY.md`'s 2026-08-25 entries for the full design/build history).
 3. **Phase 16 itself is still NOT done** - its own exit criteria
    (`PROJECT_PLAN.md §11`: "All pages navigable, auth-gated correctly") means every module needs
    its own standalone list/detail pages, the same way Properties got `PropertiesListPage`/
-   `PropertyDetailPage`/`PropertyFormPage`. **Remaining, per Prompt 16's own page list**: Meter
-   Readings (list/detail), Admin Settings, and a Risk Matrix configuration screen (create/edit
-   `RiskMatrixLevels` - scope §19's "the exact risk matrix should remain configurable,"
-   deliberately deferred from the Risk Register pass as a secondary feature, not silently
-   dropped). The wizard's quick-create flow (Sub-phase D) lets an inspector CREATE a
-   MeterReading from inside an inspection, the same gap Maintenance/Risk/Cleaning/Vacant Units
-   all had before their own standalone modules were built - there's still no page anywhere in the
-   app to browse, filter, or manage MeterReading records afterward. No order has been decided for
+   `PropertyDetailPage`/`PropertyFormPage`. **Remaining, per Prompt 16's own page list**: Admin
+   Settings, and a Risk Matrix configuration screen (create/edit `RiskMatrixLevels` - scope §19's
+   "the exact risk matrix should remain configurable," deliberately deferred from the Risk
+   Register pass as a secondary feature, not silently dropped). No order has been decided for
    these yet - an open decision for a future session.
-   - A pattern worth reusing across all of these, confirmed five times now across Maintenance/
-     Sub-phase D/Cleaning/Vacant Units (and Risk Register confirming the OPPOSITE once - that
-     sometimes the existing API surface already IS enough): read the relevant `_service.py`
-     file's authorization logic BEFORE designing each module's frontend gating, and check
-     whether the existing API surface actually supports what a management page needs (a picker,
-     a filter, a company-wide query) before assuming it does either way - don't assume a gap
-     exists any more than assuming one doesn't. Also worth carrying forward: when a new response
-     shape needs fields that aren't real columns on the underlying ORM object, build it via an
-     explicit classmethod (`from_row`/`from_issue`-style) rather than reaching for
-     `.model_validate()` on an object that doesn't have them - this project's now-standing
-     convention, confirmed working a fourth time with Vacant Units.
+   - A pattern worth reusing for whichever of these is next, confirmed six times now across
+     Maintenance/Sub-phase D/Cleaning/Vacant Units (and Risk Register + Meter Readings each
+     confirming the OPPOSITE - that sometimes the existing API surface already IS enough): read
+     the relevant `_service.py`/`_repository.py` file's authorization logic and query shape
+     BEFORE designing a module's frontend or assuming a backend gap exists - don't assume a gap
+     exists any more than assuming one doesn't; Meter Readings this session needed a display
+     enrichment (`PropertyName`/`InspectionId`) but genuinely no new route. Also worth carrying
+     forward: when a new response shape needs fields that aren't real columns on the underlying
+     ORM object, build it via an explicit classmethod (`from_row`-style) rather than reaching for
+     `.model_validate()` on an object that doesn't have them - confirmed working a fifth time with
+     Meter Readings, and when enriching an EXISTING query/route rather than adding a new one,
+     check every other caller of the function being changed first (Meter Readings' `get_
+     meter_reading` had to stay untouched because `media_service.py` and `update_meter_reading`
+     both depend on it returning a bare ORM object, not a tuple - the enrichment went into a new,
+     separate function instead).
 
 ## Files that require attention
 

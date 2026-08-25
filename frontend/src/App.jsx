@@ -65,6 +65,14 @@
  * inspector, or Administrator/Manager, confirmed by reading vacant_unit_service.py), and
  * recording a finding only ever happens from within an Inspection (Sub-phase E's "Add Empty
  * Unit" gateway action), so no standalone create route exists.
+ *
+ * Meter Readings: view (list/detail) has no role restriction. No `/meter-readings/new` or `/:id/
+ * edit` routes - creating a reading needs a live camera/file-picker moment tied to the
+ * MeterReading answer type inside an inspection question (Sub-phase D), not a standalone form,
+ * and confirming/correcting is a per-record check computed on `MeterReadingDetailPage` itself (a
+ * genuinely hybrid tier, confirmed by reading meter_reading_service.py: Inspection-linked reuses
+ * the assigned-inspector-or-Admin/Manager rule, a standalone reading falls back to Admin/Manager
+ * only).
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -96,6 +104,8 @@ import { CleaningInspectionsListPage } from "./pages/cleaning/CleaningInspection
 import { CleaningInspectionDetailPage } from "./pages/cleaning/CleaningInspectionDetailPage";
 import { VacantUnitInspectionsListPage } from "./pages/vacant-units/VacantUnitInspectionsListPage";
 import { VacantUnitInspectionDetailPage } from "./pages/vacant-units/VacantUnitInspectionDetailPage";
+import { MeterReadingsListPage } from "./pages/meter-readings/MeterReadingsListPage";
+import { MeterReadingDetailPage } from "./pages/meter-readings/MeterReadingDetailPage";
 import {
   CAN_MANAGE_PROPERTIES,
   CAN_CONDUCT_INSPECTIONS,
@@ -162,6 +172,9 @@ export function App() {
 
                 <Route path="/vacant-unit-inspections" element={<VacantUnitInspectionsListPage />} />
                 <Route path="/vacant-unit-inspections/:id" element={<VacantUnitInspectionDetailPage />} />
+
+                <Route path="/meter-readings" element={<MeterReadingsListPage />} />
+                <Route path="/meter-readings/:id" element={<MeterReadingDetailPage />} />
               </Route>
             </Route>
 

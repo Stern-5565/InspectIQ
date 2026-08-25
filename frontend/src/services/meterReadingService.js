@@ -1,23 +1,33 @@
 /**
- * Wraps /api/meter-readings - see app/api/meter_readings.py. Only what Sub-phase D's Question
- * screen needs: list (filtered by inspection_response_id, to check whether a reading already
- * exists for this question), create (the photo -> mock OCR step, one multipart request per
- * app/services/meter_reading_service.py's own "single combined action" design), and update (the
- * inspector's confirm-or-correct step). The full standalone Meter Readings module (list/detail
- * outside a wizard question) is one of Phase 16's remaining pages, not built yet.
+ * Wraps /api/meter-readings - see app/api/meter_readings.py. listMeterReadings started as
+ * Sub-phase D's Question-screen need (filtered by inspection_response_id, to check whether a
+ * reading already exists for this question) and now also serves the standalone Meter Readings
+ * module's list page (meterType filter added for it) - the backend route itself didn't need to
+ * change shape, just its response model (PropertyName/InspectionId), since this list/detail was
+ * ALREADY company-wide (app/repositories/meter_reading_repository.py's module docstring).
+ * getMeterReading is new, for the standalone module's detail page. create (the photo -> mock OCR
+ * step, one multipart request per app/services/meter_reading_service.py's own "single combined
+ * action" design) and update (the inspector's confirm-or-correct step) are unchanged from
+ * Sub-phase D.
  */
 import { apiClient } from "../api/client";
 
-export async function listMeterReadings({ inspectionResponseId, propertyId, page = 1, pageSize = 20 }) {
+export async function listMeterReadings({ inspectionResponseId, propertyId, meterType, page = 1, pageSize = 20 }) {
   const { data } = await apiClient.get("/meter-readings", {
     params: {
       inspection_response_id: inspectionResponseId || undefined,
       property_id: propertyId || undefined,
+      meter_type: meterType || undefined,
       page,
       page_size: pageSize,
     },
   });
-  return data; // PaginatedResponse<MeterReadingResponse>
+  return data; // PaginatedResponse<MeterReadingSummaryResponse>
+}
+
+export async function getMeterReading(meterReadingId) {
+  const { data } = await apiClient.get(`/meter-readings/${meterReadingId}`);
+  return data; // MeterReadingSummaryResponse (PropertyName/InspectionId included)
 }
 
 export async function createMeterReading({ propertyId, meterType, inspectionResponseId, meterSerialNumber, file }) {
