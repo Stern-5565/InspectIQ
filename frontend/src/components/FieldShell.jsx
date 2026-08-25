@@ -9,7 +9,7 @@
  */
 import { useId } from "react";
 
-export function FieldShell({ label, required, error, children }) {
+export function FieldShell({ label, required, error, disabled, children }) {
   const id = useId();
   const errorId = `${id}-error`;
 
@@ -18,6 +18,7 @@ export function FieldShell({ label, required, error, children }) {
     "aria-invalid": error ? true : undefined,
     "aria-describedby": error ? errorId : undefined,
     required,
+    disabled,
   };
 
   return (

@@ -21,15 +21,15 @@
  * yet - app/api/inspection_templates.py's own module docstring), so neither of its two routes
  * is nested under a role-narrowing ProtectedRoute at all.
  *
- * Inspections: viewing (list/get/sections/questions) has no role restriction either - only
- * `/inspections/new` (starting one) is gated to `CAN_CONDUCT_INSPECTIONS`. The Sections and
- * Question screens are nested under `InspectionWizardLayout` (a layout route, same pattern as
- * `MainLayout` one level up) so both share one fetch of the inspection instead of each
- * re-fetching it - see that file's own header comment. Whether a given user can actually EDIT
- * the one inspection they're looking at (not just any inspection) is a per-record check
- * (`ensure_can_edit` on the backend) that `allowedRoles` can't express, so
- * `InspectionWizardLayout` computes `canEdit` itself and the question/sections pages read it
- * from `useOutletContext()` rather than a route-level gate.
+ * Inspections: viewing (list/get/sections/questions/review) has no role restriction either -
+ * only `/inspections/new` (starting one) is gated to `CAN_CONDUCT_INSPECTIONS`. The Sections,
+ * Question, and Review screens are all nested under `InspectionWizardLayout` (a layout route,
+ * same pattern as `MainLayout` one level up) so all three share one fetch of the inspection
+ * instead of each re-fetching it - see that file's own header comment. Whether a given user can
+ * actually EDIT the one inspection they're looking at (not just any inspection) is a per-record
+ * check (`ensure_can_edit` on the backend) that `allowedRoles` can't express, so
+ * `InspectionWizardLayout` computes `canEdit` itself and the question/sections/review pages read
+ * it from `useOutletContext()` rather than a route-level gate.
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -50,6 +50,7 @@ import { StartInspectionPage } from "./pages/inspections/StartInspectionPage";
 import { InspectionWizardLayout } from "./pages/inspections/InspectionWizardLayout";
 import { InspectionSectionsPage } from "./pages/inspections/InspectionSectionsPage";
 import { InspectionQuestionPage } from "./pages/inspections/InspectionQuestionPage";
+import { InspectionReviewPage } from "./pages/inspections/InspectionReviewPage";
 import { CAN_MANAGE_PROPERTIES, CAN_CONDUCT_INSPECTIONS } from "./constants/roles";
 
 export function App() {
@@ -85,6 +86,7 @@ export function App() {
                 <Route path="/inspections/:id" element={<InspectionWizardLayout />}>
                   <Route index element={<InspectionSectionsPage />} />
                   <Route path="sections/:sectionIndex/questions/:questionIndex" element={<InspectionQuestionPage />} />
+                  <Route path="review" element={<InspectionReviewPage />} />
                 </Route>
               </Route>
             </Route>

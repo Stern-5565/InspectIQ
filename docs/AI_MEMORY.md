@@ -1516,3 +1516,66 @@ direct DB query. Confirmed a Viewer sees neither button on the Sections screen. 
 375px scroll fix with real measurements (above). All test data (the inspection, its 102 snapshot
 responses, the vacant-unit record, the cleaning record) cleaned up afterward, including manually
 restoring the demo unit's `OccupancyStatus` back to `Occupied`.
+
+## 2026-08-25 — Inspection engine Sub-phase F built: Review and Submit, closing out the whole wizard
+
+Inspection Review - the last of the six sub-phases planned earlier this date. New
+`InspectionReviewPage.jsx`, a third page nested under `InspectionWizardLayout` alongside
+Sections and Question, reached via a "Review & Submit" link (relabelling to "View Review
+Summary" post-submit) added to the Sections screen. Sets `GeneralNotes`/`OverallCondition`/
+`OverallRiskRating` via the `PATCH /api/inspections/{id}` endpoint added specifically for this
+during Sub-phase A's own planning session - the first thing to actually use it.
+
+**`OverallRiskRating`'s options come from the company's own live risk matrix, not a hardcoded
+list** - a new `riskService.getRiskMatrix()` wraps `GET /api/risk-matrix-levels`, and the
+select's options are that response's `LevelName`s. This isn't an invented nicety - it's
+literally what `app/schemas/inspection.py`'s own existing comment already said should happen
+("an inspector's overall rating should be free to use the same vocabulary their company's matrix
+does"), just never implemented until a frontend consumer needed it.
+
+**Deliberately did NOT attempt to compute "which mandatory questions remain unanswered"
+client-side**, even though it would make for a richer pre-submit summary. `InspectionResponseSchema`'s
+frozen snapshot doesn't carry the live `IsMandatory` flag - reconstructing that logic here
+(e.g. by cross-referencing the live template) would duplicate, and risk silently disagreeing
+with, `submit_inspection`'s own authoritative count-and-preview computation. Chose to surface
+that backend message verbatim via `getErrorMessage()` on a 422 instead - matching the "let the
+backend be the source of truth" principle `MediaAttachments.jsx`'s AllowsPhoto/RequiresPhoto
+decision already established earlier this session, now applied to a second, harder case.
+
+**A small but real component gap, found and closed rather than routed around**: `SelectField`/
+`FormField`/`FieldShell` had never needed a `disabled` prop before - every other disabled
+control in this app (Sections/Question screens) disables a plain `<button>`/`<input>` directly,
+never through these shared field components. Added `disabled` to `FieldShell`'s `fieldProps`
+(one place, benefits `FormField` too, not just `SelectField`) rather than hand-rolling a
+one-off `<select>` outside the shared component just for this page.
+
+**Verified live, thoroughly, closing the loop on the whole wizard**: on a fresh 0%-complete
+inspection, attempting Submit surfaced the backend's own exact message ("Cannot submit: 13
+mandatory question(s)...", with real question text) - confirmed byte-for-byte, not a
+paraphrase, proving the "don't duplicate this logic" decision above actually holds up. Set
+`OverallCondition=Good` and `OverallRiskRating=Low` (a REAL seeded matrix `LevelName`, not a
+placeholder) - both saved instantly, confirmed surviving a full page reload. Typed
+`GeneralNotes`, confirmed the debounced/blur-flush save fired exactly like the Question screen's
+own Notes field. Rather than clicking through all 102 questions by hand to reach a submittable
+state (impractical for a verification pass), answered every response directly via the API
+(`IsNotApplicable: true` on all of them - a type-agnostic way to satisfy `_is_answered`
+regardless of `AnswerTypeSnapshot`, so it works uniformly including the `MeterReading` question
+without needing a real photo/OCR round-trip for this particular check), then performed the
+actual SUBMIT through the real UI - confirmed via a direct DB query that `Status`/`SubmittedAt`/
+`CompletedAt` and all three summary fields persisted exactly as entered. Confirmed every control
+on the Review page, and every answer control on a real Question page, became disabled once
+`Submitted` - the wizard's post-submission immutability (Phase 8's own rule) now visibly
+enforced in the actual UI, not just at the API layer. Confirmed a direct `POST .../submit`
+against the same already-submitted inspection correctly 409s - double-submit protection,
+exercised through this page's own real flow for the first time this session (previously only
+ever hit via a backend test). Confirmed a Viewer sees the same confirmed values read-only with
+no Submit button. No horizontal overflow at 375px. All test data cleaned up from the real DB
+afterward.
+
+**This closes the entire Inspection Engine Wizard (Prompt 17), scope's own "most important
+screen in the application," across all six sub-phases planned earlier this date.** Phase 16
+itself is NOT done, though - its exit criteria needs every module's own standalone list/detail
+pages too (Maintenance, Risk Register, Cleaning, Vacant Units, Meter Readings, Admin Settings),
+which the wizard's quick-create paths only ever fed records INTO, never gave a way to browse or
+manage afterward. No sub-phase order has been chosen for those yet - an open decision for
+whenever that work starts, not something today's planning session covered.

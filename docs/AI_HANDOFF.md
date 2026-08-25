@@ -965,10 +965,61 @@ Current status. Overwrite/update this file at the end of every session or phase 
     afterward, including manually restoring the demo unit's `OccupancyStatus` back to
     `Occupied`.
 
+- **Phase 16 continued — Inspection engine wizard, Sub-phase F (Inspection Review and Submit)
+  complete. This closes out the entire Prompt 17 wizard - all six sub-phases (A-F) done.** New
+  `pages/inspections/InspectionReviewPage.jsx`, a third page nested under
+  `InspectionWizardLayout` (alongside Sections and Question), reached via a new "Review & Submit"
+  link on the Sections screen (relabels to "View Review Summary" once `Status === "Submitted"`).
+  - Sets `GeneralNotes`/`OverallCondition`/`OverallRiskRating` via the existing
+    `PATCH /api/inspections/{id}` (added during Sub-phase A's own planning specifically for
+    this) - `OverallCondition` from a fixed enum select (`constants/
+    overallConditionOptions.js`), `OverallRiskRating` from a NEW `riskService.getRiskMatrix()`
+    call - the company's own configured risk-band `LevelName`s (`GET /api/risk-matrix-levels`),
+    not a hardcoded list, matching `app/schemas/inspection.py`'s own documented reasoning for
+    leaving that field a plain string. `GeneralNotes` debounce-saves the same way Notes does on
+    the Question screen; both selects save instantly on change - same "as few taps as possible"
+    instant-save philosophy as the rest of the wizard, no separate "Save" step anywhere on this
+    page.
+  - **Deliberately does NOT try to compute "which mandatory questions are unanswered" client-
+    side** - `InspectionResponseSchema`'s frozen snapshot has no live `IsMandatory` flag (the
+    same fact `MediaAttachments.jsx` already established for `AllowsPhoto`/`RequiresPhoto`), so
+    reconstructing that logic here would risk silently disagreeing with the backend's own check.
+    `submit_inspection` already computes the exact count and a preview of which questions on a
+    422 - this page surfaces that message verbatim via `getErrorMessage()` rather than
+    duplicating it.
+  - `components/SelectField.jsx`/`FormField.jsx`/`FieldShell.jsx` gained a `disabled` prop -
+    the FIRST place in the frontend needing a disabled select (Sections/Question screens
+    disable native `<button>`/`<input>` elements directly, never through these shared
+    components) - a real, if minor, gap found and closed rather than working around it with a
+    one-off inline `<select>`.
+  - After a successful submit, the page stays put and calls `applyInspectionUpdate` +  shows a
+    local `Toast` - no navigation - the same "update in place" pattern
+    `PropertyDetailPage`'s deactivate flow already uses, simpler than the create-then-redirect-
+    with-`location.state` pattern that pattern's OWN toast machinery also supports.
+  - **Verified live**: on a fresh 0%-complete inspection, attempting Submit correctly surfaced
+    the backend's own precise message ("Cannot submit: 13 mandatory question(s)...", listing
+    real question text) - confirmed the exact same wording appears, not a paraphrase. Set
+    `OverallCondition=Good`/`OverallRiskRating=Low` (the real seeded matrix's own `LevelName`) -
+    each PATCHed instantly, confirmed via a page reload that both persisted. Typed
+    `GeneralNotes`, confirmed the debounced PATCH fired via `onBlur`. Answered every response
+    directly via the API (`IsNotApplicable: true` on all 102 - type-agnostic, works regardless
+    of `AnswerTypeSnapshot`) to reach 100% without needing to click through 102 questions for a
+    verification pass, then submitted successfully through the real UI - `Status` flipped to
+    `Submitted`, `SubmittedAt`/`CompletedAt` set, confirmed via a direct DB query that all three
+    summary fields persisted exactly as entered. Confirmed every field/control on the Review
+    page (and every answer control on a real Question page) became disabled once `Submitted`.
+    Confirmed a direct `POST .../submit` against the ALREADY-submitted inspection correctly
+    409s (double-submit protection, Phase 8's own rule, exercised here for real through this
+    page for the first time). Confirmed a Viewer sees the same confirmed values read-only, no
+    Submit button. No console errors beyond the deliberately-triggered 422 from the mandatory-
+    validation test itself. No horizontal overflow at 375px. All test data (the inspection and
+    its 102 responses) cleaned up from the real DB afterward.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (Inspection engine Sub-phase E) to git is the next
-  action, before starting Sub-phase F (Inspection Review and Submit - the final sub-phase).
+- Nothing in progress. Committing this batch (Inspection engine Sub-phase F) to git is the next
+  action. **The entire Inspection Engine Wizard (Prompt 17, all six sub-phases) is now done** -
+  see "Next tasks" for what's left in Phase 16 overall (the ~19-page list minus what's built).
 
 ## Important decisions
 
@@ -1083,13 +1134,13 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Inspection engine Sub-phase E) to git.
-2. **Phase 16 continues — the Inspection engine wizard, Sub-phase F next (the final sub-phase).**
-   Prompt 17's "most important screen in the application," planned in detail with the owner on
-   2026-08-25 (see `docs/AI_MEMORY.md`'s entries of that date for the full design discussion,
-   including the "gateway sections" discovery that shaped this, and Sub-phases A/B/C/D/E's own
-   live-verification findings). Deliberately staged into sub-phases rather than built as one
-   page, each independently committable and verifiable:
+1. Commit this batch (Inspection engine Sub-phase F) to git.
+2. **The Inspection engine wizard (Prompt 17) is now fully DONE - all six sub-phases (A-F)
+   built and verified live.** Planned in detail with the owner on 2026-08-25 (see
+   `docs/AI_MEMORY.md`'s entries of that date for the full design discussion, including the
+   "gateway sections" discovery that shaped this, and each sub-phase's own live-verification
+   findings). Deliberately staged into sub-phases rather than built as one page, each
+   independently committable and verifiable:
    - **Sub-phase A — DONE**, commit `fa3006e` - the core wizard: Inspection List, Start
      Inspection, the Sections screen, and the Question screen for the five plain answer types
      (`YesNo`/`PassFail`/`Condition`/`Text`/`Number`/`Date`), autosave (debounced while typing,
@@ -1121,15 +1172,28 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
      first. Found and fixed a real CSS gap (`.dialog` had no `max-height`/scroll, which
      `AddEmptyUnitModal`'s ~15-field form would have overflowed) before it could surface as a
      live bug. See the "What has been completed" entry above for the full detail.
-   - **Sub-phase F (next)** — Inspection Review (now genuinely useful thanks to the new
-     `PATCH /api/inspections/{id}` - lets the inspector set `OverallCondition`/
-     `OverallRiskRating`/`GeneralNotes` before submitting) and Submit. "Inspection Report" (PDF)
-     is explicitly OUT of scope for all of this - it depends on backend Phase 17
-     (`PROJECT_PLAN.md §11`'s phase table), which doesn't exist yet.
-   - No further "pause for owner review" checkpoint is needed before continuing within Phase 16
-     itself, or between these sub-phases - the owner already reviewed and approved the overall
-     plan (sub-phase order, the `Condition`-preset-buttons choice, and the
-     `PATCH /api/inspections/{id}` addition) on 2026-08-25.
+   - **Sub-phase F — DONE** (commit pending as of this writing) - Inspection Review
+     (`OverallCondition`/`OverallRiskRating`/`GeneralNotes` via the `PATCH /api/inspections/{id}`
+     added during Sub-phase A's planning) and Submit. "Inspection Report" (PDF) is explicitly
+     OUT of scope for all of this - it depends on backend Phase 17 (`PROJECT_PLAN.md §11`'s
+     phase table), which doesn't exist yet. See the "What has been completed" entry above for
+     the full detail.
+
+3. **Phase 16 itself is NOT yet done** - its own exit criteria (`PROJECT_PLAN.md §11`: "All
+   pages navigable, auth-gated correctly") means every module needs its OWN standalone list/
+   detail pages too, the same way Properties got `PropertiesListPage`/`PropertyDetailPage`/
+   `PropertyFormPage`. The wizard's quick-create modals (Sub-phases C/D/E) let an inspector
+   CREATE a MaintenanceIssue/RiskAssessment/MeterReading/VacantUnitInspection/CleaningInspection
+   from inside an inspection, but there is still no page anywhere in the app to browse, filter,
+   or manage those records afterward - e.g. no way to see "all open maintenance issues across
+   the company," assign one, or change its status, the way the backend's own
+   `PATCH /{id}/assign`/`PATCH /{id}/status` endpoints already support. Remaining pages, per
+   Prompt 16's own list and Phase 16's intro entry above: Maintenance (list/detail, assign,
+   status/timeline), Risk Register (list/detail, matrix config UI), Cleaning (areas config,
+   grading history), Vacant Units (list/detail), Meter Readings (list/detail), Admin Settings.
+   No sub-phase order has been decided for these yet - that's an open decision for a future
+   session, not something 2026-08-25's planning session covered (it only approved the wizard's
+   own six sub-phases).
 
 ## Files that require attention
 

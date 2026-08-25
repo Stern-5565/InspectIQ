@@ -5,9 +5,9 @@
  */
 import { FieldShell } from "./FieldShell";
 
-export function SelectField({ label, name, value, onChange, options, required, error, placeholder }) {
+export function SelectField({ label, name, value, onChange, options, required, error, placeholder, disabled }) {
   return (
-    <FieldShell label={label} required={required} error={error}>
+    <FieldShell label={label} required={required} error={error} disabled={disabled}>
       {(fieldProps) => (
         <select {...fieldProps} name={name} value={value} onChange={onChange} className="form-field__input">
           {placeholder && (

@@ -101,6 +101,12 @@ export function InspectionSectionsPage() {
         </p>
       )}
 
+      <p>
+        <Link to={`/inspections/${id}/review`} className="button button--secondary">
+          {inspection.Status === "Submitted" ? "View Review Summary" : "Review & Submit"}
+        </Link>
+      </p>
+
       {canUseGatewayActions && (
         <div className="question-card__quick-actions">
           <button type="button" className="button button--secondary" onClick={() => setShowAddUnitModal(true)}>
