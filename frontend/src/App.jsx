@@ -8,11 +8,11 @@
  *   header shell once, around whichever page is active (see layouts/MainLayout.jsx).
  * - "*" catches any URL that doesn't match one of the routes above.
  *
- * Dashboard + Properties/Units + Inspection Templates exist as real pages so far - this file
- * grows one nested <Route> block per module as each module's frontend gets built (same
- * incremental order as the backend), the same shape PropertyManager's App.jsx used across its
- * own modules. Dashboard needs no `allowedRoles` (constants/roles.js - GET /api/dashboard has
- * no role gate at all), so it's the one route NOT wrapped in a second, role-narrowing
+ * Dashboard + Properties/Units + Inspection Templates + Inspections exist as real pages so far
+ * - this file grows one nested <Route> block per module as each module's frontend gets built
+ * (same incremental order as the backend), the same shape PropertyManager's App.jsx used across
+ * its own modules. Dashboard needs no `allowedRoles` (constants/roles.js - GET /api/dashboard
+ * has no role gate at all), so it's the one route NOT wrapped in a second, role-narrowing
  * ProtectedRoute. Properties' VIEW routes are the same way (no CAN_VIEW_PROPERTIES exists - any
  * company member can view); only the create/edit routes are nested under a second
  * ProtectedRoute with `allowedRoles={CAN_MANAGE_PROPERTIES}`. Units have no routes of their own
@@ -20,6 +20,16 @@
  * for why). Inspection Templates are read-only end to end (no mutation exists in the backend
  * yet - app/api/inspection_templates.py's own module docstring), so neither of its two routes
  * is nested under a role-narrowing ProtectedRoute at all.
+ *
+ * Inspections: viewing (list/get/sections/questions) has no role restriction either - only
+ * `/inspections/new` (starting one) is gated to `CAN_CONDUCT_INSPECTIONS`. The Sections and
+ * Question screens are nested under `InspectionWizardLayout` (a layout route, same pattern as
+ * `MainLayout` one level up) so both share one fetch of the inspection instead of each
+ * re-fetching it - see that file's own header comment. Whether a given user can actually EDIT
+ * the one inspection they're looking at (not just any inspection) is a per-record check
+ * (`ensure_can_edit` on the backend) that `allowedRoles` can't express, so
+ * `InspectionWizardLayout` computes `canEdit` itself and the question/sections pages read it
+ * from `useOutletContext()` rather than a route-level gate.
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -35,7 +45,12 @@ import { PropertyDetailPage } from "./pages/properties/PropertyDetailPage";
 import { PropertyFormPage } from "./pages/properties/PropertyFormPage";
 import { InspectionTemplatesListPage } from "./pages/inspection-templates/InspectionTemplatesListPage";
 import { InspectionTemplateDetailPage } from "./pages/inspection-templates/InspectionTemplateDetailPage";
-import { CAN_MANAGE_PROPERTIES } from "./constants/roles";
+import { InspectionsListPage } from "./pages/inspections/InspectionsListPage";
+import { StartInspectionPage } from "./pages/inspections/StartInspectionPage";
+import { InspectionWizardLayout } from "./pages/inspections/InspectionWizardLayout";
+import { InspectionSectionsPage } from "./pages/inspections/InspectionSectionsPage";
+import { InspectionQuestionPage } from "./pages/inspections/InspectionQuestionPage";
+import { CAN_MANAGE_PROPERTIES, CAN_CONDUCT_INSPECTIONS } from "./constants/roles";
 
 export function App() {
   return (
@@ -60,6 +75,17 @@ export function App() {
 
                 <Route path="/inspection-templates" element={<InspectionTemplatesListPage />} />
                 <Route path="/inspection-templates/:id" element={<InspectionTemplateDetailPage />} />
+
+                <Route path="/inspections" element={<InspectionsListPage />} />
+
+                <Route element={<ProtectedRoute allowedRoles={CAN_CONDUCT_INSPECTIONS} />}>
+                  <Route path="/inspections/new" element={<StartInspectionPage />} />
+                </Route>
+
+                <Route path="/inspections/:id" element={<InspectionWizardLayout />}>
+                  <Route index element={<InspectionSectionsPage />} />
+                  <Route path="sections/:sectionIndex/questions/:questionIndex" element={<InspectionQuestionPage />} />
+                </Route>
               </Route>
             </Route>
 

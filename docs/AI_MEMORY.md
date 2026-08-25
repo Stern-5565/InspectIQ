@@ -1213,3 +1213,57 @@ badge - the one answer type with a real, DB-enforced (well, service-enforced -
 (even the "Poor"/"Fair"/"Good" preset from decision #2 above) deliberately do NOT drive a
 Failed badge - that would mean inventing a "Poor means failed" rule that exists only in this
 frontend's own preset button labels, not anywhere the backend actually defines or enforces it.
+
+## 2026-08-25 — Inspection engine Sub-phase A built and verified live
+
+The core wizard (Inspection List, Start Inspection, Sections screen, Question screen) from the
+plan discussed earlier the same day - see the entry above for the design. Two real problems
+were found only by actually running it against a real inspection, not by reading the code back:
+
+**Bug: "Failed" badge outlived the answer it was attached to.** The backend allows
+`IsNotApplicable=true` and a stale `AnswerText="Fail"` to coexist on the same response (marking
+something N/A doesn't clear a prior answer) - confirmed live by marking a real `PassFail="Fail"`
+question Not Applicable and watching the Failed badge stay lit. Fixed by making the two states
+mutually exclusive in the DISPLAY only (`!response.IsNotApplicable && isFailed(response)`) -
+the backend's data model is unchanged and correct as-is; a stale Failed badge next to a
+"Marked as Not Applicable" message would have actively misled whoever reads it next, not just
+looked untidy.
+
+**Robustness fix: blur-only autosave isn't good enough for a field on a phone.** The original
+design saved Text/Number/Notes fields on blur, matching a common desktop-web pattern. Verifying
+this live surfaced a hard blocker for testing it that way: this session's Browser-pane tooling
+does not reliably deliver `blur`/`focusout` events for programmatic `.focus()`/`.blur()` calls,
+confirmed by attaching temporary listeners that never fired despite `document.activeElement`
+provably changing - a different manifestation of the same "pane not compositing" class of
+limitation documented in the 2026-08-24 entry (CSS transform reads going stale after
+interaction). Rather than treating this as purely a testing inconvenience to route around, it
+raised the real question of whether blur is trustworthy for the ACTUAL target usage (an
+inspector on a phone) - and it isn't: backgrounding the app mid-inspection or an OS keyboard
+dismissal doesn't reliably fire blur either. Added `utilities/useDebouncedCallback.js` -
+Text/Number/Notes now save 700ms after the last keystroke as the PRIMARY path, with an
+immediate flush on blur as a fallback, not the only trigger. Confirmed this actually works (not
+just "should work"): typing into the Notes field and waiting, with no blur ever triggered at
+all, produced a real `PATCH` with the typed text roughly 700ms later.
+
+**Standing lesson reinforced**: the same environment limitation that broke CSS-transform
+verification on 2026-08-24 broke blur-event verification here too, in a different guise. Both
+times, chasing the apparent test failure with alternative verification methods (CSSOM
+inspection then; onChange-based fields that don't depend on blur, then a temporary listener
+that proved blur genuinely never fires, now) - rather than either trusting a broken test result
+or giving up on verifying - is what surfaced the real design improvement (the debounce fix) that
+a blur-only implementation would have shipped without.
+
+**Verified live, thoroughly, after both fixes**: every plain answer type exercised against a
+real inspection with real data - `YesNo`/`PassFail` button taps saved instantly and flipped the
+Answered badge; a `PassFail="Fail"` answer showed Failed, and marking it Not Applicable
+correctly hid Failed (the fix, re-confirmed); `Condition="Poor"` showed Answered with NO Failed
+badge (confirming the deliberate non-heuristic from the earlier planning session); a `Date`
+question saved on change; `Notes` saved via the new debounced path with zero blur events
+involved; a `MeterReading` question showed the honest "coming in a later update" placeholder
+while N/A/Notes stayed fully usable; Previous/Next correctly crossed a section boundary in both
+directions; the Sections screen's overall `3.9% complete (4/102)` exactly matched the real
+answers given AND the backend's own `CompletionPercentage`; a Viewer got every control disabled
+plus a "view only" notice and was blocked from `/inspections/new` entirely; a Bright Spaces
+Administrator got a real "Inspection not found." on the same inspection ID; no page-level
+horizontal overflow at 375px; all test data (the inspection and its 102 snapshot responses)
+cleaned up from the real DB afterward.

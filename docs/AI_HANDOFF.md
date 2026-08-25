@@ -738,11 +738,77 @@ Current status. Overwrite/update this file at the end of every session or phase 
     three fields over actual HTTP → confirmed they came back correctly → confirmed an invalid
     enum value still 422s → test inspection cleaned up.
 
+- **Phase 16 continued — Inspection engine wizard, Sub-phase A (core wizard) complete.** The
+  five plain answer types, autosave, and status badges - see `docs/AI_MEMORY.md`'s 2026-08-25
+  entry for the full design discussion (the "gateway sections" discovery, the sub-phase
+  breakdown, and why). Sub-phases B-F (photos, maintenance/risk quick-create, meter reading,
+  gateway actions, review/submit) are NOT built yet - see Next tasks.
+  - `services/inspectionService.js` wraps `/api/inspections` including the new
+    `updateInspectionSummary` (the `PATCH /api/inspections/{id}` just added).
+  - `constants/roles.js` gained `CAN_CONDUCT_INSPECTIONS` (Administrator/Manager/Inspector,
+    mirroring `_conduct_inspections` in `app/api/inspections.py`) - but a route-level role check
+    alone can't express the backend's per-record `ensure_can_edit` (only the assigned inspector,
+    or Admin/Manager, may edit ONE SPECIFIC inspection), so that's computed at runtime instead
+    (see `InspectionWizardLayout.jsx`), the same "role list isn't enough" pattern the constant's
+    own comment documents.
+  - `pages/inspections/InspectionsListPage.jsx` - the familiar list pattern (property/status
+    filters, `DataTable`), with property names resolved via a one-off `listProperties` fetch
+    (`InspectionSummaryResponse` only carries `PropertyId`, same as every other module).
+  - `pages/inspections/StartInspectionPage.jsx` - property + template + date form;
+    `?propertyId=` in the URL pre-selects the property, since `PropertyDetailPage` now has its
+    own "Start Inspection" button linking here that way.
+  - `pages/inspections/InspectionWizardLayout.jsx` - a layout route (same shape as `MainLayout`
+    one level up) wrapping the Sections and Question screens, fetching the inspection (and its
+    property, for the header) ONCE and sharing it via React Router's `useOutletContext()` -
+    `applyResponseUpdate`/`applyInspectionUpdate` splice a PATCH's response back into local
+    state instead of re-fetching the whole inspection after every answer, keeping question-to-
+    question navigation instant. Also computes `canEdit` here, once, for the reason above.
+  - `pages/inspections/InspectionSectionsPage.jsx` - property header + progress bar + tappable
+    section list, each showing its own `answered/total` count.
+  - `pages/inspections/InspectionQuestionPage.jsx` - one question at a time, Previous/Next
+    computed from a flattened cross-section position list (so the boundary between sections is
+    seamless, not a dead end), an `AnswerControl` sub-component switching on
+    `AnswerTypeSnapshot`. Photo/Video/Create Maintenance/Create Risk buttons scope names for
+    every question are deliberately NOT here - showing non-functional buttons would be worse
+    than omitting them (sub-phases B/C).
+  - `utilities/inspectionAnswers.js` - `isAnswered` (mirrors the backend's own `_is_answered`
+    exactly, so the frontend's displayed completion never disagrees with
+    `CompletionPercentage`) and `isFailed` (only `PassFail`+`"Fail"` - see the design-discussion
+    memory entry for why `Condition`'s freeform values deliberately don't drive this).
+  - **A real bug found and fixed during live verification, not left in**: the "Failed" badge
+    initially showed even when a question was ALSO marked Not Applicable (the backend allows
+    both flags true at once - marking N/A doesn't clear a prior `AnswerText`). Fixed so N/A
+    takes display precedence - a stale Failed badge on a question the inspector has since
+    marked N/A would be actively misleading, not just untidy.
+  - **A real robustness gap found and fixed during live verification**: the original design
+    saved Text/Number/Notes fields on blur only. Verifying this live surfaced that blur is not
+    reliably triggerable/observable even in the *testing* tooling used for this session - which
+    prompted checking whether it's reliable for real MOBILE use either, and it isn't (backgrounding
+    an app or the OS dismissing a keyboard doesn't always fire blur). Added
+    `utilities/useDebouncedCallback.js` - these three fields now save 700ms after the last
+    keystroke (the primary path) with an immediate flush on blur as a fallback, not the only
+    trigger. Confirmed working live: typing into Notes with no blur at all produced a real
+    `PATCH` roughly 700ms after typing stopped.
+  - **Verified live, through the real running UI**, covering every plain answer type: started a
+    real inspection → answered a `YesNo` question (button tap, instant save, badge flipped to
+    Answered) → a `PassFail` question answered "Fail" showed the Failed badge; the same
+    question then marked Not Applicable correctly hid it → a `Condition` question answered
+    "Poor" showed Answered with NO Failed badge (confirming the deliberate non-heuristic) → a
+    `Date` question saved on change → `Notes` saved via the new debounced path with no blur
+    triggered at all → a `MeterReading` question showed the honest placeholder while N/A/Notes
+    stayed usable → Previous/Next correctly crossed a section boundary in both directions → the
+    Sections screen's per-section counts and overall `3.9% complete (4/102)` matched the real
+    answers given, exactly agreeing with the backend's own `CompletionPercentage` → a Viewer
+    (not in `CAN_CONDUCT_INSPECTIONS`) could see the inspection with every control correctly
+    disabled and a "view only" notice shown, and got blocked from `/inspections/new` entirely →
+    a Bright Spaces Administrator got a real "Inspection not found." on the same inspection ID
+    (cross-company isolation) → confirmed no page-level horizontal overflow at 375px mobile
+    width → all test data cleaned up from the real DB afterward.
+
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (the `PATCH /api/inspections/{id}` backend
-  addition) to git is the next action, before starting Sub-phase A of the Inspection engine
-  frontend.
+- Nothing in progress. Committing this batch (Inspection engine Sub-phase A) to git is the next
+  action, before starting Sub-phase B (Photo/Video per question).
 
 ## Important decisions
 
@@ -857,26 +923,21 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (the `PATCH /api/inspections/{id}` backend addition) to git.
-2. **Phase 16 continues — the Inspection engine wizard**, Prompt 17's "most important screen in
-   the application," planned in detail with the owner on 2026-08-25 (see `docs/AI_MEMORY.md`'s
-   entry of that date for the full design discussion, including the "gateway sections"
-   discovery that shaped this). Deliberately staged into sub-phases rather than built as one
-   page, each independently committable and verifiable:
-   - **Sub-phase A (next, in progress)** — the core wizard: Inspection List
-     (`services/inspectionService.js`, reusing the `DataTable` pattern), Start Inspection (a
-     small property+template+date form), the Sections screen (header + tappable section list,
-     each showing its own completion %), and the Question screen (one question at a time,
-     Previous/Next, autosave via `PATCH .../responses/{id}`) for the five plain answer types
-     (`YesNo`/`PassFail`/`Condition`/`Text`/`Number`/`Date` - NOT `MeterReading`, deferred to D).
-     `Condition` renders as curated preset buttons (Good/Fair/Poor - owner's explicit choice,
-     2026-08-25), not a plain text field, even though the backend leaves it freeform. Status
-     badges: Answered/Unanswered (derived the same way `calculate_completion_percentage`
-     already does - answered or `IsNotApplicable`) and Failed (`AnswerTypeSnapshot === "PassFail"
-     && AnswerText === "Fail"` specifically - the only answer type with an unambiguous DB-backed
-     failure value; `Condition`'s freeform values get no such badge, since inventing a "Poor
-     means failed" rule the backend doesn't enforce would be guessing).
-   - **Sub-phase B** — Photo/Video per question (`POST /api/media`, `EntityType=
+1. Commit this batch (Inspection engine Sub-phase A) to git.
+2. **Phase 16 continues — the Inspection engine wizard, Sub-phase B next.** Prompt 17's "most
+   important screen in the application," planned in detail with the owner on 2026-08-25 (see
+   `docs/AI_MEMORY.md`'s entries of that date for the full design discussion, including the
+   "gateway sections" discovery that shaped this, and Sub-phase A's own live-verification
+   findings). Deliberately staged into sub-phases rather than built as one page, each
+   independently committable and verifiable:
+   - **Sub-phase A — DONE** (commit pending as of this writing) - the core wizard: Inspection
+     List, Start Inspection, the Sections screen, and the Question screen for the five plain
+     answer types (`YesNo`/`PassFail`/`Condition`/`Text`/`Number`/`Date`), autosave (debounced
+     while typing, not blur-only - a real robustness fix found during verification), and status
+     badges (Answered/Unanswered/Failed, with Not-Applicable correctly taking display
+     precedence over a stale Failed badge - another fix found during verification). See the
+     "What has been completed" entry above for the full detail.
+   - **Sub-phase B (next)** — Photo/Video per question (`POST /api/media`, `EntityType=
      InspectionResponse`) - the frontend's first file-upload UI.
    - **Sub-phase C** — Create Maintenance Issue / Create Risk quick-create modals per question
      (minimal fields, `InspectionResponseId` supplied so the backend derives Property/Location

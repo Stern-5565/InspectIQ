@@ -25,7 +25,7 @@ import { Toast } from "../../components/Toast";
 import { EmptyState } from "../../components/EmptyState";
 import { useAuth } from "../../contexts/AuthContext";
 import { hasAnyRole } from "../../utilities/permissions";
-import { CAN_MANAGE_PROPERTIES } from "../../constants/roles";
+import { CAN_MANAGE_PROPERTIES, CAN_CONDUCT_INSPECTIONS } from "../../constants/roles";
 import { OCCUPANCY_STATUS_OPTIONS } from "../../constants/unitOptions";
 import { getProperty, deactivateProperty } from "../../services/propertyService";
 import { listUnits, createUnit, updateUnit, updateUnitOccupancy } from "../../services/unitService";
@@ -217,6 +217,7 @@ export function PropertyDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const canManage = hasAnyRole(user, CAN_MANAGE_PROPERTIES);
+  const canConductInspections = hasAnyRole(user, CAN_CONDUCT_INSPECTIONS);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -296,11 +297,19 @@ export function PropertyDetailPage() {
       <PageHeader
         title={property.PropertyName}
         actions={
-          canManage &&
           property.IsActive && (
-            <Link to={`/properties/${id}/edit`} className="button button--secondary">
-              Edit
-            </Link>
+            <>
+              {canConductInspections && (
+                <Link to={`/inspections/new?propertyId=${id}`} className="button">
+                  Start Inspection
+                </Link>
+              )}
+              {canManage && (
+                <Link to={`/properties/${id}/edit`} className="button button--secondary">
+                  Edit
+                </Link>
+              )}
+            </>
           )
         }
       />

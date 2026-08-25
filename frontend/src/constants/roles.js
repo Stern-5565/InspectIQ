@@ -24,3 +24,15 @@ export const ALL_ROLES = [ADMINISTRATOR, MANAGER, INSPECTOR, MAINTENANCE, VIEWER
 // Units share the exact same shape (app/api/units.py's own docstring says so explicitly), so
 // one constant covers both - no separate CAN_MANAGE_UNITS.
 export const CAN_MANAGE_PROPERTIES = [ADMINISTRATOR, MANAGER];
+
+// Inspections: viewing (list/get) has no role restriction, same as every module above -
+// Maintenance/Viewer can still see an inspection's results. Starting/answering/submitting is
+// narrower (Administrator/Manager/Inspector - app/api/inspections.py's _conduct_inspections),
+// but that role check alone is NOT sufficient to decide whether to show editing controls for
+// one SPECIFIC inspection - the backend's own ensure_can_edit additionally requires being that
+// inspection's own assigned inspector (or Admin/Manager). That per-record check can't be
+// expressed as a static role list the way ProtectedRoute's `allowedRoles` works, so pages that
+// need it compute `canEditThisInspection` at runtime (CAN_MANAGE_PROPERTIES-equivalent roles,
+// OR `user.UserId === inspection.InspectorUserId`) instead of relying on this constant alone -
+// see pages/inspections/InspectionWizardLayout.jsx.
+export const CAN_CONDUCT_INSPECTIONS = [ADMINISTRATOR, MANAGER, INSPECTOR];
