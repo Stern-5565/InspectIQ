@@ -1789,3 +1789,52 @@ mutate tier). A cross-company Administrator got a real 404 on the new detail end
 horizontal overflow at 375px on any of the three surfaces touched (Areas section, List, Detail).
 All test data (the area, the inspection and its 102 responses, the cleaning grade, its media row
 and file) cleaned up afterward.
+
+## 2026-08-25 — Vacant Units module built: same gap as Cleaning, confirmed by the exact same read-the-repository-first check
+
+Fourth (and, per `AI_HANDOFF.md`'s own remaining list, second-to-last) Phase 16 standalone
+module. Same starting gap as Cleaning: `VacantUnitInspection` records already existed from the
+wizard's "Add Empty Unit" gateway action (Sub-phase E) with nowhere to browse them afterward.
+Confirmed by reading `vacant_unit_inspection_repository.py` first, exactly the same check that
+found Cleaning's gap - every query in the file was scoped to one already-authorized Inspection
+(`list_for_inspection`), nothing queried across a whole company. Added
+`list_vacant_unit_inspections_for_company` (VacantUnitInspection→Inspection→Unit→Property, for
+pagination) and `get_vacant_unit_inspection_detail` (composes three existing fetchers -
+`get_vacant_unit_inspection`, `inspection_service.get_inspection`,
+`unit_service.get_unit` - the same "compose for a single lookup, real JOIN only for the
+paginated list" split Cleaning established). `VacantUnitInspectionSummaryResponse` extends the
+base response with `PropertyId`/`UnitNumber` via an explicit `from_row` classmethod, the same
+`CleaningInspectionSummaryResponse`/`MaintenanceIssueDetailResponse.from_issue` convention, now
+confirmed a fourth time.
+
+**No new authorization tier this time - confirmed, not assumed.** Read
+`vacant_unit_service.py`'s own module docstring first: the SAME single tier Phase 12 already
+established (the parent Inspection's assigned inspector, or Administrator/Manager, via
+`ensure_can_edit`) governs both the wizard's create action and this module's update, and
+`media_service.py` was already confirmed (Phase 12's own verification) to gate
+`VacantUnitInspection` photos on that identical check. So `VacantUnitInspectionDetailPage.jsx`'s
+`canEdit`/`MediaAttachments` wiring is a straight port of `CleaningInspectionDetailPage.jsx`'s
+shape, not a new one derived from scratch - the fifth data point on the standing "there's no
+default, check every time" lesson landed on "actually the same as last time," which is itself
+useful information, not a wasted check.
+
+2 new backend tests (136 total): the standalone list includes `PropertyId`/`UnitNumber` and
+correctly filters/excludes by `property_id`, and the standalone detail 404s for a different
+company. Full suite reruns clean.
+
+**Verified live, full loop**: as Administrator, started a real inspection on "15 High Road" and
+used the EXISTING "Add Empty Unit" gateway action (Sub-phase E, unmodified) to record a finding
+on "Flat 1" (Condition=Fair, ElectricityOn=No) - confirmed it appeared on the NEW company-wide
+list with the correct resolved Property/Unit names, and on the NEW detail page with every
+tri-state field rendered correctly (`No`/`Yes`/`Not checked`, not silently collapsed to a
+boolean). Edited it (WaterOn→Yes, added Notes) - confirmed via toast, re-render, and that
+untouched fields (Condition, ElectricityOn) survived the partial `PATCH`. A Bright Spaces
+Administrator got a real 404 on the same detail URL and saw zero rows on their own list - full
+cross-company isolation confirmed on both new endpoints, not just one. All test data (the
+inspection and its 102 responses, the vacant-unit record) cleaned up afterward, including
+manually restoring "Flat 1"'s `OccupancyStatus` back to `Occupied` (the same real side effect
+Phase 12's own test fixture has to account for).
+
+**Remaining Phase 16 pages, per `AI_HANDOFF.md`'s own list**: Meter Readings (list/detail),
+Admin Settings, and a Risk Matrix configuration screen. No order decided yet for a future
+session.

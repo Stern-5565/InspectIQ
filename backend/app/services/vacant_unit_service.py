@@ -102,6 +102,35 @@ def get_vacant_unit_inspection(
     return record
 
 
+def list_vacant_unit_inspections_for_company(
+    db: Session,
+    current_user: User,
+    *,
+    page: int,
+    page_size: int,
+    property_id: int | None = None,
+) -> tuple[list, int]:
+    """The standalone Vacant Units module's list - see repo.
+    list_vacant_unit_inspections_for_company's own docstring for why this didn't exist before
+    that module needed it."""
+    return repo.list_vacant_unit_inspections_for_company(
+        db, current_user.CompanyId, page=page, page_size=page_size, property_id=property_id
+    )
+
+
+def get_vacant_unit_inspection_detail(db: Session, current_user: User, vacant_unit_inspection_id: int):
+    """The standalone Vacant Units module's single-detail lookup - composes three already-
+    existing, already-authorized single-object fetchers (this function's own
+    get_vacant_unit_inspection, inspection_service.get_inspection for PropertyId,
+    unit_service.get_unit for UnitNumber), the same "compose, don't add a new joined query"
+    reasoning as cleaning_service.get_cleaning_inspection_detail - a single detail lookup is
+    cheap enough as three plain calls, and reusing them means no isolation logic is duplicated."""
+    record = get_vacant_unit_inspection(db, current_user, vacant_unit_inspection_id)
+    inspection = inspection_service.get_inspection(db, current_user, record.InspectionId)
+    unit = unit_service.get_unit(db, current_user, record.UnitId)
+    return record, inspection.PropertyId, unit.UnitNumber
+
+
 def update_vacant_unit_inspection(
     db: Session, current_user: User, vacant_unit_inspection_id: int, payload: VacantUnitInspectionUpdate
 ) -> VacantUnitInspection:

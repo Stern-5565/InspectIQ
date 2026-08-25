@@ -69,3 +69,39 @@ class VacantUnitInspectionResponse(BaseModel):
     MaintenanceRequired: bool | None
     Notes: str | None
     CreatedAt: datetime
+
+
+class VacantUnitInspectionSummaryResponse(VacantUnitInspectionResponse):
+    """The standalone Vacant Units module's own shape (list + single detail) - adds
+    PropertyId/UnitNumber, neither a real column on VacantUnitInspection itself (reached only via
+    Inspection and Unit respectively). Built explicitly via from_row, never `.model_validate()`
+    on a bare VacantUnitInspection - that ORM object has no such attributes, matching
+    CleaningInspectionSummaryResponse's exact convention (app/schemas/cleaning.py)."""
+
+    PropertyId: int
+    UnitNumber: str
+
+    @classmethod
+    def from_row(cls, record, property_id: int, unit_number: str) -> "VacantUnitInspectionSummaryResponse":
+        return cls(
+            VacantUnitInspectionId=record.VacantUnitInspectionId,
+            InspectionId=record.InspectionId,
+            UnitId=record.UnitId,
+            DateIdentifiedVacant=record.DateIdentifiedVacant,
+            Condition=record.Condition,
+            ElectricityOn=record.ElectricityOn,
+            WaterOn=record.WaterOn,
+            HeatingWorking=record.HeatingWorking,
+            WindowsSecure=record.WindowsSecure,
+            DoorsSecure=record.DoorsSecure,
+            SignsOfLeaks=record.SignsOfLeaks,
+            SignsOfDamp=record.SignsOfDamp,
+            SignsOfPests=record.SignsOfPests,
+            CleaningRequired=record.CleaningRequired,
+            WasteItemsLeftBehind=record.WasteItemsLeftBehind,
+            MaintenanceRequired=record.MaintenanceRequired,
+            Notes=record.Notes,
+            CreatedAt=record.CreatedAt,
+            PropertyId=property_id,
+            UnitNumber=unit_number,
+        )

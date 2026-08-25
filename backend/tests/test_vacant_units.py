@@ -367,3 +367,94 @@ def test_upload_photo_to_vacant_unit_inspection_via_media_endpoint(
         db_session.commit()
     finally:
         _delete_inspection(db_session, inspection_id)
+
+
+# --- Standalone Vacant Units module: GET /vacant-unit-inspections (list) and .../{id} (detail) --
+
+
+def test_list_all_vacant_unit_inspections_includes_property_and_unit_number(
+    client: TestClient,
+    db_session: Session,
+    northgate_admin,
+    northgate_property_id: int,
+    template_id: int,
+    occupied_unit_id: int,
+) -> None:
+    headers = auth_headers(client, northgate_admin.Email)
+    inspection = _start_inspection(client, headers, northgate_property_id, template_id)
+    inspection_id = inspection["InspectionId"]
+
+    try:
+        create = client.post(
+            f"/api/inspections/{inspection_id}/vacant-unit-inspections",
+            json={"UnitId": occupied_unit_id, "Condition": "Fair"},
+            headers=headers,
+        )
+        assert create.status_code == 201
+        record_id = create.json()["VacantUnitInspectionId"]
+
+        listing = client.get("/api/vacant-unit-inspections", headers=headers)
+        assert listing.status_code == 200
+        matches = [i for i in listing.json()["items"] if i["VacantUnitInspectionId"] == record_id]
+        assert len(matches) == 1
+        assert matches[0]["PropertyId"] == northgate_property_id
+        assert matches[0]["UnitNumber"] == "Flat 1"
+        assert matches[0]["Condition"] == "Fair"
+
+        filtered = client.get(
+            "/api/vacant-unit-inspections", params={"property_id": northgate_property_id}, headers=headers
+        )
+        assert filtered.status_code == 200
+        assert record_id in [i["VacantUnitInspectionId"] for i in filtered.json()["items"]]
+
+        other_property_id = db_session.execute(
+            select(Property.PropertyId).where(
+                Property.PropertyId != northgate_property_id,
+                Property.CompanyId
+                == db_session.execute(
+                    select(Property.CompanyId).where(Property.PropertyId == northgate_property_id)
+                ).scalar_one(),
+            )
+        ).scalars().first()
+        filtered_out = client.get(
+            "/api/vacant-unit-inspections", params={"property_id": other_property_id}, headers=headers
+        )
+        assert filtered_out.status_code == 200
+        assert record_id not in [i["VacantUnitInspectionId"] for i in filtered_out.json()["items"]]
+    finally:
+        _delete_inspection(db_session, inspection_id)
+
+
+def test_get_vacant_unit_inspection_detail_isolates_by_company(
+    client: TestClient,
+    db_session: Session,
+    northgate_admin,
+    bright_spaces_admin,
+    northgate_property_id: int,
+    template_id: int,
+    occupied_unit_id: int,
+) -> None:
+    headers = auth_headers(client, northgate_admin.Email)
+    inspection = _start_inspection(client, headers, northgate_property_id, template_id)
+    inspection_id = inspection["InspectionId"]
+
+    try:
+        create = client.post(
+            f"/api/inspections/{inspection_id}/vacant-unit-inspections",
+            json={"UnitId": occupied_unit_id},
+            headers=headers,
+        )
+        record_id = create.json()["VacantUnitInspectionId"]
+
+        own_view = client.get(f"/api/vacant-unit-inspections/{record_id}", headers=headers)
+        assert own_view.status_code == 200
+        assert own_view.json()["UnitNumber"] == "Flat 1"
+        assert own_view.json()["PropertyId"] == northgate_property_id
+
+        other_view = client.get(
+            f"/api/vacant-unit-inspections/{record_id}",
+            headers=auth_headers(client, bright_spaces_admin.Email),
+        )
+        assert other_view.status_code == 404
+    finally:
+        _delete_inspection(db_session, inspection_id)

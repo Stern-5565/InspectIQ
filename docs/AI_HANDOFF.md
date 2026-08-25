@@ -1300,93 +1300,34 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Inspection engine Sub-phase F) to git.
-2. **The Inspection engine wizard (Prompt 17) is now fully DONE - all six sub-phases (A-F)
-   built and verified live.** Planned in detail with the owner on 2026-08-25 (see
-   `docs/AI_MEMORY.md`'s entries of that date for the full design discussion, including the
-   "gateway sections" discovery that shaped this, and each sub-phase's own live-verification
-   findings). Deliberately staged into sub-phases rather than built as one page, each
-   independently committable and verifiable:
-   - **Sub-phase A — DONE**, commit `fa3006e` - the core wizard: Inspection List, Start
-     Inspection, the Sections screen, and the Question screen for the five plain answer types
-     (`YesNo`/`PassFail`/`Condition`/`Text`/`Number`/`Date`), autosave (debounced while typing,
-     not blur-only - a real robustness fix found during verification), and status badges
-     (Answered/Unanswered/Failed, with Not-Applicable correctly taking display precedence over a
-     stale Failed badge - another fix found during verification). See the "What has been
-     completed" entry above for the full detail.
-   - **Sub-phase B — DONE**, commit `9eb11c6` - Photo/Video per question, via the new generic
-     `components/MediaAttachments.jsx` against `EntityType=InspectionResponse`. A real CSP bug
-     (blob: URLs blocked for thumbnails) was found and fixed - see the "What has been completed"
-     entry above and `docs/AI_MEMORY.md`'s 2026-08-25 entry for the full story.
-   - **Sub-phase C — DONE**, commit `779a0b6` - Create Maintenance Issue / Create Risk
-     quick-create modals, gated on a NEW `canRaiseIssues` check (deliberately not `editable` - a
-     real authorization distinction from Photo/Video, see the "What has been completed" entry
-     above). Minimal fields; `InspectionResponseId` supplied so the backend derives Property/
-     Location itself, same as every other creation path into those two modules.
-   - **Sub-phase D — DONE** (commit pending as of this writing) - the `MeterReading` answer
-     type's own flow (photo → mock OCR → confirm/correct, wired to `/api/meter-readings`, not
-     the generic response-update endpoint - though confirming DOES also call the generic
-     endpoint once, to sync `AnswerNumber` for `CompletionPercentage`). A small, justified
-     backend addition (`inspection_response_id` filter on `GET /api/meter-readings`) and a third
-     distinct authorization shape (create vs. confirm) were both found by reading the service
-     code first - see the "What has been completed" entry above.
-   - **Sub-phase E — DONE** (commit pending as of this writing) - the two global "gateway"
-     quick-actions confirmed necessary by the seed data's own design comment (`database/seed/
-     12_SeedInspectionTemplate.sql`'s file header): "Add Empty Unit" and "Grade Cleaning Area",
-     placed on the Sections screen rather than any one question. No backend changes needed - both
-     already gated create on `ensure_can_edit`, confirmed by reading each service function
-     first. Found and fixed a real CSS gap (`.dialog` had no `max-height`/scroll, which
-     `AddEmptyUnitModal`'s ~15-field form would have overflowed) before it could surface as a
-     live bug. See the "What has been completed" entry above for the full detail.
-   - **Sub-phase F — DONE** (commit pending as of this writing) - Inspection Review
-     (`OverallCondition`/`OverallRiskRating`/`GeneralNotes` via the `PATCH /api/inspections/{id}`
-     added during Sub-phase A's planning) and Submit. "Inspection Report" (PDF) is explicitly
-     OUT of scope for all of this - it depends on backend Phase 17 (`PROJECT_PLAN.md §11`'s
-     phase table), which doesn't exist yet. See the "What has been completed" entry above for
-     the full detail.
-
-3. **Phase 16 itself is NOT yet done** - its own exit criteria (`PROJECT_PLAN.md §11`: "All
-   pages navigable, auth-gated correctly") means every module needs its OWN standalone list/
-   detail pages too, the same way Properties got `PropertiesListPage`/`PropertyDetailPage`/
-   `PropertyFormPage`.
-   - **Maintenance — DONE** (commit pending as of this writing) - list/detail/assign/status/
-     notes/photos, plus a small justified `GET /api/users` backend addition for the Assign
-     picker. See the "What has been completed" entry above for the full detail, including two
-     real bugs found and fixed during live verification (a stale Timeline after photo upload,
-     and a missing Edit-success toast).
-   - **Risk Register — DONE** (commit pending as of this writing) - list/detail/create/edit,
-     including a standalone create form (a deliberate difference from Maintenance - see the
-     "What has been completed" entry above for why). No backend changes needed this time. Two
-     tiers (`canManage` for Edit, unconditional `editable` for Photos - a genuinely different,
-     independently-confirmed rule from Maintenance's).
-   - **Cleaning — DONE** (commit pending as of this writing) - grading history list/detail
-     (needed two new backend endpoints, `GET /cleaning-inspections` and `.../{id}`, since nothing
-     before this queried CleaningInspections across a whole company) plus a CleaningAreas config
-     section added to `PropertyDetailPage.jsx`. See the "What has been completed" entry above for
-     the full detail, including the third distinct Photos authorization tier confirmed this
-     session.
-   - **Remaining, per Prompt 16's own page list**: Vacant Units (list/detail), Meter Readings
-     (list/detail), Admin Settings, and a Risk Matrix configuration screen (create/edit
-     `RiskMatrixLevels` - scope §19's "the exact risk matrix should remain configurable,"
-     deliberately deferred from the Risk Register pass as a secondary feature, not silently
-     dropped). The wizard's quick-create modals (Sub-phase D) let an inspector CREATE a
-     MeterReading/VacantUnitInspection from inside an inspection, the same gap Maintenance/Risk/
-     Cleaning had - there's still no page anywhere in the app to browse, filter, or manage those
-     records afterward. No order has been decided for these yet - an open decision for a future
-     session, not something 2026-08-25's planning session covered (it only approved the wizard's
-     own six sub-phases).
-   - A pattern worth reusing across all of these, confirmed multiple times now (Maintenance's
-     `GET /api/users`, Sub-phase D's `inspection_response_id` filter, Cleaning's two new
-     `/cleaning-inspections` endpoints, and Risk Register confirming the OPPOSITE - that
+1. Commit this batch (standalone Vacant Units module) to git.
+2. **The Inspection engine wizard (Prompt 17, all six sub-phases A-F) and Phase 16's Maintenance,
+   Risk Register, Cleaning, and Vacant Units standalone modules are all DONE and committed** (see
+   the "What has been completed" section above for each one's own detail, and
+   `docs/AI_MEMORY.md`'s 2026-08-25 entries for the full design/build history).
+3. **Phase 16 itself is still NOT done** - its own exit criteria
+   (`PROJECT_PLAN.md §11`: "All pages navigable, auth-gated correctly") means every module needs
+   its own standalone list/detail pages, the same way Properties got `PropertiesListPage`/
+   `PropertyDetailPage`/`PropertyFormPage`. **Remaining, per Prompt 16's own page list**: Meter
+   Readings (list/detail), Admin Settings, and a Risk Matrix configuration screen (create/edit
+   `RiskMatrixLevels` - scope §19's "the exact risk matrix should remain configurable,"
+   deliberately deferred from the Risk Register pass as a secondary feature, not silently
+   dropped). The wizard's quick-create flow (Sub-phase D) lets an inspector CREATE a
+   MeterReading from inside an inspection, the same gap Maintenance/Risk/Cleaning/Vacant Units
+   all had before their own standalone modules were built - there's still no page anywhere in the
+   app to browse, filter, or manage MeterReading records afterward. No order has been decided for
+   these yet - an open decision for a future session.
+   - A pattern worth reusing across all of these, confirmed five times now across Maintenance/
+     Sub-phase D/Cleaning/Vacant Units (and Risk Register confirming the OPPOSITE once - that
      sometimes the existing API surface already IS enough): read the relevant `_service.py`
      file's authorization logic BEFORE designing each module's frontend gating, and check
      whether the existing API surface actually supports what a management page needs (a picker,
      a filter, a company-wide query) before assuming it does either way - don't assume a gap
      exists any more than assuming one doesn't. Also worth carrying forward: when a new response
-     shape needs fields that aren't real columns on the underlying ORM object (Cleaning's
-     `PropertyId`/`AreaName`), build it via an explicit classmethod (`from_row`/`from_issue`-
-     style) rather than reaching for `.model_validate()` on an object that doesn't have them -
-     this project's now-standing convention, confirmed working a third time.
+     shape needs fields that aren't real columns on the underlying ORM object, build it via an
+     explicit classmethod (`from_row`/`from_issue`-style) rather than reaching for
+     `.model_validate()` on an object that doesn't have them - this project's now-standing
+     convention, confirmed working a fourth time with Vacant Units.
 
 ## Files that require attention
 

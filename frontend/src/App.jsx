@@ -58,6 +58,13 @@
  * create route exists either. CleaningAreas (the per-property config half of this module) has
  * no routes of its own at all - it lives inside `PropertyDetailPage`, the same reasoning Units
  * already established.
+ *
+ * Vacant Units: view (list/detail) has no role restriction. No `/vacant-unit-inspections/new` or
+ * `/:id/edit` routes either, the exact same reasoning as Cleaning - mutation is a per-record
+ * check computed on `VacantUnitInspectionDetailPage` itself (the parent Inspection's assigned
+ * inspector, or Administrator/Manager, confirmed by reading vacant_unit_service.py), and
+ * recording a finding only ever happens from within an Inspection (Sub-phase E's "Add Empty
+ * Unit" gateway action), so no standalone create route exists.
  */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -87,6 +94,8 @@ import { RiskAssessmentDetailPage } from "./pages/risk/RiskAssessmentDetailPage"
 import { RiskAssessmentFormPage } from "./pages/risk/RiskAssessmentFormPage";
 import { CleaningInspectionsListPage } from "./pages/cleaning/CleaningInspectionsListPage";
 import { CleaningInspectionDetailPage } from "./pages/cleaning/CleaningInspectionDetailPage";
+import { VacantUnitInspectionsListPage } from "./pages/vacant-units/VacantUnitInspectionsListPage";
+import { VacantUnitInspectionDetailPage } from "./pages/vacant-units/VacantUnitInspectionDetailPage";
 import {
   CAN_MANAGE_PROPERTIES,
   CAN_CONDUCT_INSPECTIONS,
@@ -150,6 +159,9 @@ export function App() {
 
                 <Route path="/cleaning-inspections" element={<CleaningInspectionsListPage />} />
                 <Route path="/cleaning-inspections/:id" element={<CleaningInspectionDetailPage />} />
+
+                <Route path="/vacant-unit-inspections" element={<VacantUnitInspectionsListPage />} />
+                <Route path="/vacant-unit-inspections/:id" element={<VacantUnitInspectionDetailPage />} />
               </Route>
             </Route>
 
