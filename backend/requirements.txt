@@ -7,3 +7,5 @@ pydantic-settings>=2.5
 pyjwt>=2.9
 bcrypt>=4.2
 python-multipart>=0.0.12
+reportlab>=5.0
+Pillow>=12.0

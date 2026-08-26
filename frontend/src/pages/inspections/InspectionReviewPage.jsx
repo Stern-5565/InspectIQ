@@ -17,8 +17,13 @@
  * questions - this page just surfaces that message verbatim via getErrorMessage() on a 422,
  * rather than duplicating (and risking drifting from) that logic.
  *
- * "Inspection Report" (PDF) is explicitly OUT of scope for this page - PROJECT_PLAN.md §11's
- * phase table makes it Phase 17, which doesn't exist yet.
+ * "Inspection Report" (PDF) is now built (Phase 17) - a "Download Report" button appears once
+ * `Status === "Submitted"`, right next to the existing "Submitted {date}" message. Fetched as a
+ * blob (`responseType: "blob"`, the same pattern `mediaService.downloadMediaBlob` already
+ * established) and saved via a temporary `<a download>` + `URL.createObjectURL`, revoked
+ * immediately after the click - the same create-then-revoke discipline
+ * `MeterReadingControl.jsx`/`MediaAttachments.jsx` already use for blob URLs, just triggering a
+ * real save instead of an inline `<img>`/`<iframe>` preview.
  */
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
@@ -27,7 +32,11 @@ import { PageHeader } from "../../components/PageHeader";
 import { SelectField } from "../../components/SelectField";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Toast } from "../../components/Toast";
-import { submitInspection, updateInspectionSummary } from "../../services/inspectionService";
+import {
+  downloadInspectionReport,
+  submitInspection,
+  updateInspectionSummary,
+} from "../../services/inspectionService";
 import { getRiskMatrix } from "../../services/riskService";
 import { OVERALL_CONDITION_OPTIONS } from "../../constants/overallConditionOptions";
 import { getErrorMessage } from "../../utilities/apiError";
@@ -47,6 +56,8 @@ export function InspectionReviewPage() {
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
+  const [downloadingReport, setDownloadingReport] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
 
   const [debouncedSaveNotes, flushSaveNotes] = useDebouncedCallback((value) => saveField({ GeneralNotes: value }));
 
@@ -85,6 +96,22 @@ export function InspectionReviewPage() {
       .finally(() => setSubmitting(false));
   }
 
+  function handleDownloadReport() {
+    setDownloadingReport(true);
+    setDownloadError(null);
+    downloadInspectionReport(id)
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `Inspection-${id}-Report.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch((err) => setDownloadError(getErrorMessage(err)))
+      .finally(() => setDownloadingReport(false));
+  }
+
   return (
     <div>
       <PageHeader title="Inspection Review" description="Confirm the overall summary before submitting." />
@@ -103,7 +130,13 @@ export function InspectionReviewPage() {
         </div>
 
         {inspection.Status === "Submitted" && (
-          <p className="empty-state">Submitted {new Date(inspection.SubmittedAt).toLocaleString()}.</p>
+          <>
+            <p className="empty-state">Submitted {new Date(inspection.SubmittedAt).toLocaleString()}.</p>
+            <button type="button" className="button button--secondary" disabled={downloadingReport} onClick={handleDownloadReport}>
+              {downloadingReport ? "Preparing report…" : "Download Report"}
+            </button>
+            {downloadError && <ErrorMessage message={downloadError} />}
+          </>
         )}
         {!canEdit && inspection.Status !== "Submitted" && (
           <p className="empty-state">

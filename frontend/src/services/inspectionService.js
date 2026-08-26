@@ -50,3 +50,10 @@ export async function submitInspection(inspectionId) {
   const { data } = await apiClient.post(`/inspections/${inspectionId}/submit`);
   return data; // InspectionDetailResponse
 }
+
+/** Phase 17 - only ever succeeds once the inspection is Submitted (the backend's own 409
+ * otherwise); same responseType: "blob" pattern mediaService.downloadMediaBlob established. */
+export async function downloadInspectionReport(inspectionId) {
+  const { data } = await apiClient.get(`/inspections/${inspectionId}/report`, { responseType: "blob" });
+  return data; // PDF Blob
+}

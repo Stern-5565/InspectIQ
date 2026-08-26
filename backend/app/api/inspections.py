@@ -23,8 +23,15 @@ inspection-level summary fields (GeneralNotes/OverallCondition/OverallRiskRating
 existed on the model and in InspectionDetailResponse since Phase 8, but nothing let a client
 ever set them until the Inspection Review screen needed to. Same auth/immutability rules as
 `update_response` - see app/services/inspection_service.py's update_inspection.
+
+`GET /{inspection_id}/report` (Phase 17) generates a PDF - view-level auth only (any company
+member, same as GET /{inspection_id} itself), since a report is just a rendering of data that's
+already visible; report_service.generate_inspection_report_pdf's own 409 is the real gate (a
+report can only be generated once the inspection is Submitted). Returns a plain Response, not
+StreamingResponse - the whole PDF is built as one in-memory bytes object, no file handle to
+manage the way media.py's stored-file download needs.
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -40,7 +47,7 @@ from app.schemas.inspection import (
 from app.schemas.pagination import PaginatedResponse
 from app.security import roles
 from app.security.dependencies import get_current_user, require_roles
-from app.services import inspection_service
+from app.services import inspection_service, report_service
 
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
@@ -107,6 +114,20 @@ def update_inspection(
     inspection = inspection_service.get_inspection(db, current_user, inspection_id)
     completion = inspection_service.calculate_completion_percentage(inspection.responses)
     return InspectionDetailResponse.from_inspection(inspection, completion)
+
+
+@router.get("/{inspection_id}/report")
+def get_inspection_report(
+    inspection_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    pdf_bytes = report_service.generate_inspection_report_pdf(db, current_user, inspection_id)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="Inspection-{inspection_id}-Report.pdf"'},
+    )
 
 
 @router.patch("/{inspection_id}/responses/{response_id}", response_model=InspectionResponseSchema)

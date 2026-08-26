@@ -2068,3 +2068,122 @@ Inspection engine wizard (Prompt 17) was already done. What remains for InspectI
 whatever Phase 17+ named in `PROJECT_PLAN.md §11`'s phase table (Inspection Report/PDF generation
 was explicitly named as out of scope for Sub-phase F, still not built) - no specific next phase
 has been chosen yet, an open decision for a future session.
+
+## 2026-08-26 — Phase 17 (PDF Inspection Reports) built and verified: a PDF library decision made by actually testing it, and two real bugs no test file would have caught
+
+Owner confirmed at the end of the prior session that this would be next; started fresh with a
+plan-mode design pass (`PROJECT_PLAN.md §9`'s own architecture sketch - one `ReportService`,
+reads a *submitted* Inspection, PDF library choice deferred to this phase) before writing any
+code, matching this project's "phase-gate at natural checkpoints" discipline.
+
+**The library choice was decided empirically, not by research**: `pip install reportlab` into
+the real `.venv` on this exact machine pulled a pure-Python wheel plus a genuine `cp314` Pillow
+wheel - no compiler, no native library. A two-line `SimpleDocTemplate` smoke test produced real
+`%PDF-1.4` bytes immediately. WeasyPrint was never even attempted - it renders HTML/CSS but
+needs the Pango/Cairo/GDK-Pixbuf native stack at runtime, which on Windows means a separate GTK3
+installer outside pip, a well-known real obstacle, not a hypothetical one. The exact same "check
+first, don't guess" instinct that's driven every module built since Cleaning, just applied to a
+dependency choice instead of a code path.
+
+**The single most important design constraint, stated explicitly so it doesn't get lost**: the
+Inspection Checklist section of the report groups `InspectionResponse.SectionNameSnapshot` in
+existing (frozen) order - it does NOT hardcode scope §22's own section list (Fire Safety, Front
+Garden, Communal Kitchen, ...). Those names are just the seeded demo template's own section
+names; this whole engine has been checklist/template-driven by design since Phase 1 specifically
+so a real company can define its own different template later. A report that hardcoded those
+section names would have silently broken the moment a second template existed - confirmed as the
+right call by rereading `PROJECT_PLAN.md §1`'s own architecture statement before writing a single
+line of `report_service.py`, not assumed from scope's illustrative wording.
+
+**Two scope-named report fields that were never actually built anywhere in this app are
+rendered honestly, not smuggled in under this task**: `Company.LogoPath` (Admin Settings'
+own module docstring already documented no upload flow exists) renders as a text-only header;
+`Inspection.InspectorSignaturePath` (grepped - confirmed nothing anywhere ever sets it, no
+signature-capture UI was ever built, scope's own "Sign / Submit" journey step names a future
+capability) renders "Not signed." Building a signature-pad feature under a "generate the report"
+task would have been real scope creep, not a natural extension of it - the report renders what
+the app actually captures, nothing more.
+
+**A new, real security consideration this pass introduced, not present in any prior module**:
+`Property.AlarmAccessCode` (a real, DB-documented plaintext-storage risk since Phase 2/6,
+`docs/DATABASE.md §10.4`) is deliberately excluded from the report entirely. A downloadable,
+printable, forwardable PDF is a materially worse exposure surface than the app's own UI (which
+at least sits behind a login and company-scoped isolation) - the first time this project has
+had to reason about a *document*, not just an API response, as its own distinct exposure
+surface.
+
+**Architecture**: one `app/services/report_service.py`, plain functions (this project's
+standing service shape, no class). `generate_inspection_report_pdf` gathers everything with
+plain ORM queries scoped directly by `InspectionId` (MaintenanceIssue/RiskAssessment/
+CleaningInspection/VacantUnitInspection all have it; MeterReading only has the nullable
+`InspectionResponseId`, so it's filtered via `IN` against this inspection's own response IDs) -
+deliberately NOT a new repository layer, since this is a one-shot "gather everything about ONE
+inspection" read that fires rarely (once per submitted inspection), not a reusable paginated
+query the way every other module's list endpoint is. Photos are fetched via the EXISTING
+`media_file_repository.list_media_files_for_entity`, called once per record that might have any
+- N+1 by design, the same "compose already-correct functions over building an unused bulk-fetch
+abstraction for a low-frequency caller" precedent Cleaning/Vacant Units' detail composition
+already established.
+
+**Summary counts reuse the wizard's own canonical definitions, not new ones**: "Failed" is
+`AnswerTypeSnapshot == "PassFail" and AnswerText == "Fail"`, the exact same one-line rule
+`frontend/src/utilities/inspectionAnswers.js`'s `isFailed()` already established as this
+project's canonical definition (that file's own docstring already documents mirroring
+`inspection_service._is_answered` for the same reason) - duplicated in Python with a comment
+naming the source of truth, the same "keep three layers in agreement by citing the canonical
+definition, not by importing a private function across modules" pattern already used for
+`isAnswered`.
+
+**Two real bugs found only by running the actual app, exactly the standing Phase-5 lesson
+reconfirming itself a third and fourth time (after Phase 9's leaked file handle and Phase 14's
+media-permission bug)** - both invisible to pytest's own bytes-length/status-code assertions:
+
+1. A corrupt/malformed image crashed the ENTIRE report with an unhandled 500, not just skipped
+   that one photo. Root cause: `PIL.Image.open()` only parses the header lazily - it doesn't
+   fail on truly broken pixel data until something actually decodes it. My per-photo
+   `try/except` wrapped the `open()` call and the `RLImage()` construction, but NEITHER of those
+   triggers a full decode - ReportLab does that itself, LATER, deep inside `doc.build()`, a code
+   path with no exception handling around it at all. Found by manually crafting a deliberately
+   malformed base64 PNG in a live browser session (an accident, not a planned test case - the
+   base64 string I typed by hand for spot-testing turned out to be truncated) and getting a real
+   500 with a full traceback in the uvicorn log, not by anything pytest's own real-JPEG fixture
+   would have exercised. Fixed with one line: `pil_image.load()` (forces the full decode) called
+   INSIDE the existing try block, right after `open()` - now a bad image renders as "Photo
+   unavailable" text and the rest of the report continues normally.
+2. Every unset-field placeholder used "—" (em dash), matching the frontend's own established
+   convention for the same thing. Extracting the downloaded PDF's real text with `pypdf` to
+   verify actual content (not just "the endpoint returned 200 with plausible byte count") showed
+   `�` (the Unicode replacement character) exactly where those dashes should be. Isolated
+   with a two-line reproduction outside any of this project's own code (a bare `reportlab.
+   pdfgen.canvas.drawString` with a literal em dash, read back with `pypdf`) to confirm it wasn't
+   something `report_service.py` did wrong - ReportLab's default base-14 fonts simply don't
+   reliably round-trip that character. Fixed by switching every placeholder to plain ASCII
+   "N/A" - a deliberate, now-documented divergence from the frontend's own "—" convention,
+   specific to PDF rendering, not an oversight or a missed find-and-replace.
+
+**Verified live end-to-end, the full Phase-16-stretch discipline applied to a document instead
+of a page**: built a real inspection through the actual running app (one `PassFail` question
+answered "Fail," every other of the 102 questions marked Not Applicable, a real photo, a
+maintenance issue, a risk assessment, and a meter reading, all created via the real API from a
+live browser session using a refreshed access token pulled from the app's own session storage),
+submitted it through the real Review page, clicked the real "Download Report" button, and
+independently re-fetched + parsed the downloaded bytes with `pypdf` outside the app entirely to
+confirm: 7 real pages, the correct company/property/inspector header, the Property Summary
+fields, the Overall Summary counts (102/102 answered, 101 N/A, 1 Failed, 1 maintenance issue, 1
+risk assessment), all 21 checklist sections present in the template's own real order with the
+Fail correctly marked "(FAILED)," the maintenance issue's `Location` correctly auto-derived from
+the failed question's own section/text (confirming end-to-end integration with Phase 10's own
+auto-fill logic, not just that the report *lists* the record), the risk assessment's
+Likelihood×Severity=Score/Level math correct, and - via `pypdf`'s own image-extraction API, not
+just visual inspection - exactly one genuinely embedded real image, with the two deliberately-
+corrupted test uploads correctly rendered as "Photo unavailable" text instead of crashing
+anything. Also confirmed the 409 (in-progress inspection) and 404 (cross-company) cases live
+against the running server, not just via pytest. All test data (the inspection, its 102
+responses, the maintenance issue, risk assessment, meter reading, and every media file/photo
+created during verification) cleaned up afterward.
+
+**This closes out Phase 17.** Per `PROJECT_PLAN.md §11`, what remains is Phase 18 (a dedicated
+adversarial testing pass across every module, scope §19), Phase 19 (an explicit dedicated
+cross-company security audit, scope §20 - isolation has been spot-checked live in nearly every
+module's own session already, but no single consolidated pass exists), and Phase 20
+(deployment). No specific next phase has been chosen - an open decision for a future session.

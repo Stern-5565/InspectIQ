@@ -1293,11 +1293,70 @@ Current status. Overwrite/update this file at the end of every session or phase 
     Manager (not just Administrator) could edit - confirming `CAN_MANAGE_RISK` really includes
     Manager. All test data (the 4 company-specific rows) cleaned up afterward. Full detail in
     `docs/AI_MEMORY.md`'s 2026-08-25 entry.
+- **Phase 17 (PDF Inspection Reports) complete.** `PROJECT_PLAN.md §11`'s exit criteria: "Report
+  matches a real submitted inspection exactly." Library choice made by actually testing on this
+  machine, not research alone: `reportlab` installed as a pure-Python wheel (plus a real `cp314`
+  Pillow wheel) with zero native dependencies and produced real `%PDF-1.4` bytes on the first
+  try; WeasyPrint was ruled out without attempting install - it needs a separate Pango/Cairo/
+  GDK-Pixbuf native runtime on Windows, a well-documented real pain point, not theoretical.
+  - New `app/services/report_service.py` (plain functions, this project's standing service
+    shape) - `generate_inspection_report_pdf` reads a `Submitted` inspection only (409 otherwise,
+    the same "reports must represent the inspection exactly as it existed at submission" rule
+    `inspection_service.py` already established for post-submission immutability), gathers
+    Property/Company/Inspector plus every linked MaintenanceIssue/RiskAssessment/
+    CleaningInspection/VacantUnitInspection/MeterReading (each via its own `InspectionId`/
+    `InspectionResponseId` filter - no new repository layer, a one-shot per-inspection gather,
+    not a reusable paginated query), and renders with ReportLab's Platypus API.
+  - **The Inspection Checklist section groups `InspectionResponse.SectionNameSnapshot` in
+    existing (frozen) order - never a hardcoded section list.** Scope §22's own report section
+    list (Fire Safety, Front Garden, ...) is just the seeded demo template's own section names;
+    since the whole engine is checklist/template-driven by design since Phase 1, a differently-
+    shaped real company template must render correctly here too.
+  - Two scope-named fields were never actually built anywhere in this app and are rendered
+    honestly, not invented under a "generate a report" task: `Company.LogoPath` (no upload flow
+    exists, per Admin Settings' own documented decision) → text-only header; `Inspection.
+    InspectorSignaturePath` (no signature-capture UI exists anywhere) → "Not signed". Also
+    deliberately excludes `Property.AlarmAccessCode` - a plaintext access code
+    (`docs/DATABASE.md §10.4`'s own flagged risk) has no business in a downloadable/forwardable
+    PDF, a materially worse exposure surface than the app UI itself accepts.
+  - `GET /api/inspections/{id}/report` returns a plain `Response` (not `StreamingResponse` - the
+    PDF is one in-memory `bytes` object, no file handle to manage). 3 new tests (155 total): a
+    rich end-to-end case (a Fail answer, a real photo, a maintenance issue, a risk assessment, a
+    meter reading - real PDF bytes, correct headers, non-trivial size), 409 on an in-progress
+    inspection, 404 cross-company.
+  - **Two real bugs found only by testing with an actual running server, not by pytest** (same
+    standing lesson as Phase 5/9/14): (1) a corrupt/malformed image crashed the ENTIRE report
+    with an unhandled 500 - `PIL.Image.open()` only reads the header lazily, so the per-photo
+    `try/except` around it never caught anything; the real decode failure happened later, deep
+    inside `doc.build()`, a code path with no exception handling at all. Fixed by forcing
+    `pil_image.load()` (a full decode) inside the try block, so a bad image is now caught and
+    rendered as "Photo unavailable" text instead of taking down the whole document. (2) Every
+    "N/A" placeholder originally used "—" (em dash), matching the frontend's own convention -
+    isolated with a two-line reproduction (`canvas.drawString` a literal em dash, read back with
+    `pypdf`) that it doesn't reliably round-trip through ReportLab's default base-14 fonts (came
+    back as U+FFFD). Fixed by using plain ASCII "N/A" throughout the report instead - a
+    deliberate, documented divergence from the frontend's own placeholder convention, not an
+    oversight.
+  - `frontend/src/services/inspectionService.js` gained `downloadInspectionReport` (same
+    `responseType: "blob"` pattern `mediaService.downloadMediaBlob` established).
+    `InspectionReviewPage.jsx` gained a "Download Report" button inside the existing
+    `Status === "Submitted"` block, saving via a temporary `<a download>` + `URL.
+    createObjectURL` (revoked immediately after the click).
+  - **Verified live end-to-end, not just via pytest**: built a real inspection (a Fail answer, a
+    photo, a maintenance issue, a risk assessment with a meter reading) through the real running
+    app, submitted it, clicked "Download Report," and extracted the real downloaded PDF's text
+    with `pypdf` to confirm actual content - correct company/property/inspector header, all 21
+    checklist sections in template order with 101 "Not Applicable"/1 "Fail (FAILED)" answers
+    correctly reflected, the maintenance issue's `Location` correctly auto-derived from the
+    failed question's section/text, the risk assessment's score/level correct, exactly one real
+    embedded image confirmed via `pypdf`'s own image extraction (two deliberately-corrupted test
+    uploads correctly skipped instead of crashing the report). Also confirmed the 409 and 404
+    cases live against the running server. All test data cleaned up afterward.
 
 ## Currently being worked on
 
-- Nothing in progress. Committing this batch (the Risk Matrix configuration screen) to git is
-  the next action. **Phase 16 is fully complete after this commit** - the next session needs to
+- Nothing in progress. Committing this batch (Phase 17: PDF Inspection Reports) to git is the
+  next action. **Phase 17 is fully complete after this commit** - the next session needs to
   choose what comes after it (see "Next tasks" below).
 
 ## Important decisions
@@ -1413,35 +1472,37 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (the Risk Matrix configuration screen) to git.
-2. **Phase 16 is now FULLY COMPLETE** - every page named in Prompt 16's own list exists and is
-   committed (Dashboard, Properties/Units, Inspection Templates, the full six-sub-phase
-   Inspection engine wizard/Prompt 17's mobile screen, Maintenance, Risk Register, Cleaning,
-   Vacant Units, Meter Readings, Admin Settings, Risk Matrix). `PROJECT_PLAN.md §11`'s exit
-   criteria ("All pages navigable, auth-gated correctly") is met. See the "What has been
-   completed" section above for each module's own detail, and `docs/AI_MEMORY.md`'s dated entries
-   for the full design/build history of each.
+1. Commit this batch (Phase 17: PDF Inspection Reports) to git.
+2. **Phase 16 (all pages) and Phase 17 (PDF reports) are both now FULLY COMPLETE and
+   committed.** See the "What has been completed" section above for each module's own detail,
+   and `docs/AI_MEMORY.md`'s dated entries for the full design/build history.
 3. **No specific next phase has been chosen yet - this is a real, open decision for the next
-   session, not something to default into.** Per `PROJECT_PLAN.md §11`'s own 20-phase table, the
-   next NAMED phase is **Phase 17: PDF reports** ("Report matches a real submitted inspection
-   exactly") - `docs/AI_MEMORY.md`'s Sub-phase F entry already flagged "Inspection Report" (PDF)
-   as explicitly out of scope for the wizard, deferred specifically to this phase. A library
-   choice (WeasyPrint vs. ReportLab, `PROJECT_PLAN.md §9`) is still undecided. After that, Phase
-   18 (adversarial testing pass, scope §19), Phase 19 (explicit cross-company security
-   verification, scope §20), and Phase 20 (deployment) remain. Don't assume Phase 17 is next
-   without confirming with the owner first - every phase gate in this project so far has stopped
-   for review, not run unattended into the next one.
-4. **Patterns worth carrying into whatever's next**, confirmed repeatedly across this whole
-   Phase-16 stretch: read the relevant `_service.py`/`_repository.py`/`_api.py` files FIRST,
+   session, not something to default into.** Per `PROJECT_PLAN.md §11`'s own 20-phase table,
+   what remains is **Phase 18** (a full adversarial testing pass across every module, scope
+   §19's own named edge cases - some of these were already covered incidentally as individual
+   modules were built, e.g. duplicate-submission 409/self-deactivation 422, but no dedicated
+   pass has been done), **Phase 19** (explicit cross-company security verification, scope §20 -
+   again, isolation has been spot-checked live in nearly every module's own session, but no
+   single dedicated audit exists), and **Phase 20** (deployment, live end-to-end, the same
+   checklist discipline PropertyManager's own deployment used). Don't assume any one of these is
+   "next" without confirming with the owner first - every phase gate in this project so far has
+   stopped for review, not run unattended into the next one.
+4. **Patterns worth carrying into whatever's next**, confirmed repeatedly across the whole
+   Phase-16/17 stretch: read the relevant `_service.py`/`_repository.py`/`_api.py` files FIRST,
    every time, before assuming a backend gap exists OR assuming one doesn't - the answer went
-   every direction across Maintenance/Cleaning/Vacant Units (real gaps), Risk Register/Meter
-   Readings/Risk Matrix (none at all), and Admin Settings (real net-new backend from scratch) -
-   guessing was wrong in every direction when tried instead of checking. Build a response shape
-   needing fields that aren't real ORM columns via an explicit `from_row` classmethod, never
-   `.model_validate()` on an object that doesn't have them. When enriching an EXISTING function
-   rather than adding a new one, check every other caller of it first. Check scope's OWN role
-   table before assuming a new module's authorization tier matches the "usual" Admin/Manager
-   pattern - don't copy the previous module's tier by default.
+   every direction (Maintenance/Cleaning/Vacant Units needed real gaps closed; Risk Register/
+   Meter Readings/Risk Matrix needed none at all; Admin Settings needed real net-new backend
+   from scratch) - guessing was wrong in every direction when tried instead of checking. Build a
+   response shape needing fields that aren't real ORM columns via an explicit `from_row`
+   classmethod, never `.model_validate()` on an object that doesn't have them. When enriching an
+   EXISTING function rather than adding a new one, check every other caller of it first. Check
+   scope's OWN role/field vocabulary before assuming a new module matches the "usual" pattern -
+   Admin Settings' Admin-only tier and Phase 17's own ASCII-only placeholder decision both came
+   from checking, not defaulting. **Pytest passing is not sufficient proof a feature works - a
+   real running server (and, for Phase 17, actually opening the generated artifact) must confirm
+   it too, every time** - this exact lesson first landed in Phase 5 and has now independently
+   reconfirmed itself in Phase 9, Phase 14, and Phase 17 (a corrupt-image crash and a font-
+   encoding bug that pytest's own bytes-length assertions never would have surfaced).
 
 ## Files that require attention
 
