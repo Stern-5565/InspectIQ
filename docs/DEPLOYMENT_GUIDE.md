@@ -32,7 +32,7 @@ subscription — `pm-*`/`propertymanager-*`):
 - SQL server: `inspectiq-sql-shmuelstern`, database `InspectIQDb`
 - Container Registry: `inspectiqacrshmuelstern` (must be globally unique, alphanumeric only)
 - Container Apps environment: `inspectiq-env`, app `inspectiq-api`
-- Storage account: `inspectiqstorage` (globally unique, lowercase alphanumeric, 3–24 chars),
+- Storage account: `inspectiqstorageshm` (globally unique, lowercase alphanumeric, 3–24 chars),
   container `media`
 - Static Web App: `inspectiq-web`
 
@@ -81,9 +81,9 @@ subscription — `pm-*`/`propertymanager-*`):
 
 ## 4. Media storage setup (new for this project)
 
-1. `az storage account create --name inspectiqstorage --resource-group inspectiq-rg --location uksouth --sku Standard_LRS`
-2. `az storage container create --name media --account-name inspectiqstorage --public-access off` — **`off` is not optional**, see §1's note on why a public container would defeat this app's whole permission model.
-3. `az storage account show-connection-string --name inspectiqstorage --resource-group inspectiq-rg` → store as the `azure-storage-connection-string` Container Apps secret (step 3.4 above).
+1. `az storage account create --name inspectiqstorageshm --resource-group inspectiq-rg --location uksouth --sku Standard_LRS`
+2. `az storage container create --name media --account-name inspectiqstorageshm --public-access off` — **`off` is not optional**, see §1's note on why a public container would defeat this app's whole permission model.
+3. `az storage account show-connection-string --name inspectiqstorageshm --resource-group inspectiq-rg` → store as the `azure-storage-connection-string` Container Apps secret (step 3.4 above).
 4. No data migration needed — a fresh production deployment starts with zero `MediaFiles` rows, same as it starts with zero `Users`/`Properties` rows.
 
 ---
@@ -268,8 +268,28 @@ Walk through live, through the actual browser against the real deployed URLs, no
    confirmed the real status via `az acr task list-runs` (polled until `Succeeded`, ~3 minutes)
    instead of trusting the crashed stream, then confirmed the image tag actually exists via
    `az acr repository show-tags`.
-4. Provision the storage account + container (§4) — pennies/month.
-5. Provision Container Apps environment + the backend app itself (§3.3–3.5) — $0 at this traffic.
+4. ~~Provision the storage account + container~~ — **done, 2026-08-26**: `inspectiqstorage`
+   was already taken globally too — used `inspectiqstorageshm` instead. Standard_LRS,
+   `AllowBlobPublicAccess: False` at the account level (an extra layer beyond the container's
+   own `--public-access off`, confirmed in the account's own properties after creation) —
+   `media` container created private, connection string saved to a local scratch file.
+5. ~~Provision Container Apps environment + the backend app itself~~ — **done, 2026-08-26**:
+   `inspectiq-env`, then `inspectiq-api` created with `--registry-identity system`
+   (auto-provisions the system-assigned Managed Identity + `AcrPull` role in one step, no
+   separate manual role-assignment command needed - simpler than PropertyManager's own session
+   had available at the time). Every secret (`db-password`, `jwt-secret-key` — fresh via
+   `secrets.token_urlsafe(64)`, `storage-connstr`) and env var from §3 wired in at create time.
+   `--min-replicas 0 --max-replicas 2`. **Worked end-to-end on the very first deployment
+   attempt** — `GET /api/health` returned `{"status":"ok","database":"connected"}` over real
+   HTTPS against the real Azure SQL database, no `msodbcsql17` TLS hang, no
+   `libgssapi-krb5-2` removal, no missing `Encrypt=yes` - all three of PropertyManager's
+   hard-won bugs were pre-empted by building the fixes in from the start rather than
+   rediscovering them live. Also explicitly configured liveness + readiness probes against
+   `/api/health` (`az containerapp update --yaml` with a minimal template patch) — closing the
+   exact gap PropertyManager's own Prompt 33 audit found and never got around to fixing
+   (`probes: null` there, confirmed live). Verified the update didn't break anything: probes
+   confirmed present via `az containerapp show`, health check still returns 200 immediately
+   after.
 6. Provision Static Web Apps + deploy the frontend (§5) — free tier.
 7. Wire CORS back to the real frontend URL (§6).
 8. Create the real Administrator account (§16).
