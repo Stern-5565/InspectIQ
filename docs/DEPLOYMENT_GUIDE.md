@@ -237,7 +237,23 @@ Walk through live, through the actual browser against the real deployed URLs, no
    (same situation PropertyManager's session hit), so the actual first build test happens via
    `az acr build` in step 3 below (a remote build, needs no local Docker) — exactly how
    PropertyManager's own Dockerfile got its first real build test.
-2. Provision the resource group + Azure SQL (§2) — first resource creation, still $0 at this tier.
+2. ~~Provision the resource group + Azure SQL~~ — **done, 2026-08-26**: `inspectiq-rg`
+   (UK South), SQL server `inspectiq-sql-shmuelstern` (admin `inspectiqadmin`, generated
+   password saved to a local scratch file outside the repo, never in chat/git — same convention
+   PropertyManager's `pmadmin` credential used; recoverable via `az sql server update
+   --admin-password` if lost), database `InspectIQDb` on the free-limit serverless offer
+   (needed `--edition GeneralPurpose --family Gen5 --capacity 2 --compute-model Serverless`
+   explicitly — the bare `--use-free-limit` flag alone errored with `ProvisioningDisabled`, not
+   documented this precisely in PropertyManager's own notes, now captured here for next time).
+   Firewall rules added for Azure services (`0.0.0.0`/`0.0.0.0`, the standard "allow Azure
+   services" convention) and this dev machine's own IP (for running the schema scripts via
+   `sqlcmd` from here). Ran `tables/01`–`08`, `constraints/09`, `indexes/10`,
+   `seed/11_SeedRoles.sql`, `seed/12_SeedInspectionTemplate.sql`, and Part A only of
+   `seed/13_SeedSampleData.sql` (the global risk matrix — extracted to a temp production-only
+   script, Part B's demo companies deliberately excluded). **Verified with real row counts
+   against the live Azure DB, not just "the script ran"**: 25 tables, 5 roles, 1 template/21
+   sections/102 questions, 4 risk matrix levels, 3 triggers, 22 CHECK constraints — and
+   `Companies`/`Users`/`Properties` all genuinely 0, confirming no demo data leaked in.
 3. Provision ACR + build/push the backend image (§3.1–3.2) — first paid resource (~$5/month).
 4. Provision the storage account + container (§4) — pennies/month.
 5. Provision Container Apps environment + the backend app itself (§3.3–3.5) — $0 at this traffic.
