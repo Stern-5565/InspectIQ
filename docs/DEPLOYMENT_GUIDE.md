@@ -8,10 +8,13 @@ needs a storage tier PropertyManager never did — Azure Blob Storage, already b
 `app/services/media_storage.py`'s `AzureBlobStorageService` and gated behind one setting,
 `MEDIA_STORAGE_PROVIDER`.
 
-**Nothing has been provisioned in Azure yet.** This document is the plan; each step below still
-needs individual confirmation before it runs, exactly like PropertyManager's Prompt 31 — real
-resources cost real money and are visible outside this machine, so this isn't something to run
-unattended top to bottom.
+**Deployment is done, 2026-08-26 — Phase 20 is complete.** Every step below ran with the
+owner's individual confirmation first, exactly like PropertyManager's Prompt 31 — nothing ran
+unattended. Nothing in the original scope doc's build sequence remains after this.
+
+Live URLs:
+- Frontend: `https://brave-moss-06f7dda03.7.azurestaticapps.net`
+- Backend: `https://inspectiq-api.orangesky-00064908.uksouth.azurecontainerapps.io`
 
 ---
 
@@ -311,5 +314,39 @@ Walk through live, through the actual browser against the real deployed URLs, no
    already correct by then, and a retry a few seconds later through the real UI succeeded
    cleanly. Not a bug, just revision-rollout propagation lag - worth a short pause after any
    `containerapp update` before trusting an immediate browser-side retry.
-8. Create the real Administrator account (§16).
-9. Full post-deployment checklist (§16), live through the browser.
+8. ~~Create the real Administrator account~~ — **done, 2026-08-26**: `shmillystern@gmail.com`,
+   Company "InspectIQ Demo" (`CompanyId=1`), Administrator role. Created via a one-off script
+   using the app's own real `hash_password` (bcrypt), connecting directly to the production DB —
+   same pattern PropertyManager's own deployment used for its first admin. Password generated,
+   saved to a local scratch file, never in chat/git. Verified two ways: `POST /api/auth/login`
+   over real HTTP returned real tokens, AND a real browser session through the live frontend
+   logged in and landed on a genuinely working Dashboard.
+9. ~~Full post-deployment checklist~~ — **done, 2026-08-26**, all live through the real browser
+   and real API, not curl alone:
+   - [x] `GET /api/health` → `{"status":"ok","database":"connected"}`.
+   - [x] Real Administrator login, through both the API and the actual deployed frontend UI.
+   - [x] Created a real Property (auto-seeded 3 CleaningAreas correctly — confirms Phase 11's
+     logic works in production, not just locally) and started a real Inspection (102 responses
+     across 21 sections, matching the seeded template exactly).
+   - [x] **Uploaded a real photo and downloaded it back — genuine byte-for-byte match** — the
+     single most important NEW verification this deployment needed, since Blob Storage is the
+     one piece PropertyManager's own deployment never had to prove. Confirmed via the actual
+     browser UI (a programmatically-constructed `File` + `DataTransfer`, since headless file
+     picker dialogs aren't drivable) AND independently via the real API (`GET /api/media/{id}
+     /download`), not just "the upload returned 201."
+   - [x] Direct navigation to a non-root frontend route resolves correctly, not a 404 (§7 above).
+   - [x] A wrong-password login attempt returns the backend's real error message, not a silent
+     CORS/CSP failure (§7 above).
+   - [x] `APP_DEBUG=false` confirmed in the live container's own env vars.
+   - [x] JWT secret guard confirmed - the app booted cleanly with the real generated secret, no
+     `ValueError` in the startup logs.
+   - PDF report generation (Phase 17) was NOT re-verified live in production this session -
+     unlike Blob Storage, nothing about report generation depends on being deployed vs. local
+     (no infrastructure dependency changed), and it already has 3 dedicated backend tests plus
+     its own full live-browser verification from Phase 17. Lower marginal value than the checks
+     above; worth doing whenever a real inspection is actually submitted in production.
+   - **All test data cleaned up afterward** - the verification Property/Inspection/102
+     responses/2 MediaFiles deleted (MediaFiles via the real `DELETE /api/media/{id}` endpoint,
+     confirmed the underlying blobs were genuinely gone via `az storage blob list` returning
+     empty - not just the DB rows), owner's own account/company data left intact. Production
+     now has exactly 1 Company, 1 User (the real Administrator), 0 Properties, 0 MediaFiles.
