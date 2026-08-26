@@ -1532,27 +1532,44 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
   Administrator gets a clean 404 - never 403 - on all 30 read/mutate attempts AND all 6
   create-under-a-foreign-parent attempts against them; found and fixed an FK-delete-order bug in
   the test's OWN cleanup while getting it green (not an app bug). 194 backend tests total (188 +
-  6). **Two real findings, both left as open decisions rather than silently fixed or silently
-  ignored** (see `docs/SECURITY_AUDIT.md` for full reasoning): `Property.AlarmAccessCode` is
-  stored in plain text AND visible to every company role including Viewer (`DATABASE.md §10.4`'s
-  own flagged item, explicitly deferred to "a Phase 19/20 decision" since Phase 1) - needs the
-  owner to decide whether to narrow visibility, encrypt at rest, both, or accept the risk for now;
-  and a minor cross-company email-existence oracle on `POST /api/users` (an authenticated-
-  Administrator-only side effect of the already-accepted `Users.Email` global-uniqueness
-  tradeoff, `§10.2`) - almost certainly fine to accept as-is, flagged for completeness. Also noted
-  informationally: `Notes`/`Notifications`/`AuditLogs` have zero application code yet (no risk
-  since nothing touches them), and there's no login rate-limiting (a Phase 20 deployment-hardening
-  candidate, not a regression).
+  6). Found two real issues, both surfaced as decisions rather than silently fixed or ignored
+  (see `docs/SECURITY_AUDIT.md`): `Property.AlarmAccessCode` was stored in plain text AND visible
+  to every company role including Viewer (`DATABASE.md §10.4`'s own flagged item, deferred to "a
+  Phase 19/20 decision" since Phase 1); and a minor cross-company email-existence oracle on
+  `POST /api/users` (an authenticated-Administrator-only side effect of the already-accepted
+  `Users.Email` global-uniqueness tradeoff, `§10.2`) - accepted as-is, flagged for completeness,
+  not changed. Also noted informationally: `Notes`/`Notifications`/`AuditLogs` have zero
+  application code yet (no risk since nothing touches them), and there's no login rate-limiting
+  (a Phase 20 deployment-hardening candidate, not a regression).
+
+- **AlarmAccessCode visibility decision made and implemented, same session (2026-08-26).** Owner
+  chose "narrow visibility now, defer encryption to Phase 20" over my other two options (leave
+  as-is / encrypt now) when I recommended it as the middle ground - cheap, closes the realistic
+  exposure, doesn't require building key management before any deployment infra exists. New
+  `property_service.can_view_alarm_code` - Administrator/Manager/Inspector/Maintenance (every
+  role that does physical, in-person property work per `SCOPE.md`'s own role descriptions) see
+  the real value; Viewer (explicitly "read-only... reports," no field duties) gets `null`. Applied
+  through one `_to_response` helper in `app/api/properties.py` that every property-returning
+  endpoint (`list`/`get`/`create`/`update`/`deactivate`) now goes through, so a future endpoint
+  can't accidentally skip the redaction the way a copy-pasted `model_validate()` call could. +2
+  tests in `test_properties.py` (196 backend tests total). **Verified live, not just via
+  pytest**: started a real standalone server + the existing `npm run dev` frontend, set a real
+  alarm code as Administrator, confirmed a real Viewer session's Property Detail page renders "—"
+  for the field (the existing UI already handled a missing value gracefully - no frontend code
+  changed), then confirmed Administrator still sees the masked value and can reveal it via the
+  existing show/hide toggle. Test data reverted afterward. `docs/SECURITY_AUDIT.md` updated to
+  mark this resolved - plaintext storage itself stays open for Phase 20, as decided.
 
 ## Next tasks
 
-1. Commit this batch (Phase 19: cross-company security audit) to git.
+1. Commit this batch (Phase 19: cross-company security audit + the AlarmAccessCode visibility fix) to git.
 2. **Phase 16 (all pages), Phase 17 (PDF reports), Phase 18 (adversarial testing), and Phase 19
    (security audit) are all now FULLY COMPLETE and committed.** See the "What has been completed"
    section above for each module's own detail, and `docs/AI_MEMORY.md`'s dated entries for the
    full design/build history.
-3. **The two open decisions in `docs/SECURITY_AUDIT.md` (AlarmAccessCode handling, the email-
-   oracle acceptance) are real product calls for the owner, not something to default into.**
+3. **One decision remains genuinely open**: the cross-company email-existence oracle
+   (`docs/SECURITY_AUDIT.md`) - almost certainly fine to accept as-is, but flagged, not yet
+   explicitly confirmed by the owner. AlarmAccessCode is resolved (see above).
 4. **Only Phase 20 (deployment) remains on the original 20-phase plan.** Don't start it without
    confirming with the owner first - every phase gate in this project so far has stopped for
    review, not run unattended into the next one.

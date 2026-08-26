@@ -2349,3 +2349,47 @@ login rate-limiting (a Phase 20 deployment-hardening candidate, not a regression
 the original 20-phase plan. No specific next step chosen - an open decision for a future
 session, and the two AlarmAccessCode/email-oracle decisions in `docs/SECURITY_AUDIT.md` are
 themselves open items the owner needs to weigh in on before Phase 20, not things to default into.
+
+## 2026-08-26 — AlarmAccessCode visibility decision made and implemented same session, closing half of a Phase-19 open item
+
+Asked for a recommendation on the two remaining AlarmAccessCode options (narrow visibility vs.
+encrypt at rest vs. leave as-is) rather than picking silently, since `DATABASE.md §10.4` had
+explicitly named this a product decision, not a code call. Recommended the middle option -
+narrow visibility now, defer encryption to Phase 20 - reasoning: visibility narrowing is cheap
+and closes the realistic exposure (a Viewer-tier account reading every property's physical alarm
+code) immediately, while encryption-at-rest needs key management infrastructure that doesn't
+exist yet and fits more naturally alongside Phase 20's other production-hardening work (real JWT
+secret, `APP_DEBUG=False`, HTTPS) than as an isolated change now. Owner agreed and asked for it
+implemented.
+
+**Implementation**: new `property_service.can_view_alarm_code(current_user)` - re-derived the
+role split from `SCOPE.md`'s own role descriptions rather than defaulting to "Administrator/
+Manager only" (my own first-pass suggestion): Inspector "conducts inspections" and Maintenance
+"updates status... uploads completion photos" are BOTH described as physical, on-site work, so
+both plausibly need the alarm code to get in the building - only Viewer ("read-only access...
+reports") has no field role at all. So the visible set is Administrator/Manager/Inspector/
+Maintenance, Viewer alone excluded - a more precise policy than the blunter Admin/Manager-only
+option I'd originally offered, found by rereading scope's actual role table instead of assuming.
+Applied at ONE helper, `_to_response` in `app/api/properties.py`, that every property-returning
+route (`list`/`get`/`create`/`update`/`deactivate`) now goes through - a deliberate choice over
+redacting per-route, so a sixth property endpoint added later can't forget the check the way a
+copy-pasted `model_validate()` call could silently do.
+
+**Verified two ways, the standing project discipline for anything user-facing**: two new tests
+in `test_properties.py` (196 backend tests total, full suite reruns clean) prove the redaction at
+the API layer; then a REAL running server (a standalone `uvicorn` restarted on port 8000
+specifically to match the frontend's `VITE_API_BASE_URL`, after first trying 8123 and finding
+the frontend couldn't reach it - a real environment-matching step, not skippable) plus the
+already-running `npm run dev` frontend, driven through the actual browser: set a real alarm code
+as Administrator via a live PATCH, logged in as a real Viewer and confirmed the Property Detail
+page renders "—" for the field (the existing UI already degrades gracefully on a missing value -
+genuinely zero frontend code needed changing), then logged back in as Administrator and confirmed
+the masked "••••••"/"Show" toggle still reveals the real value. Test data reverted (`AlarmAccessCode`
+set back to `null`) afterward, both standalone-server processes stopped cleanly.
+
+`docs/SECURITY_AUDIT.md` updated to mark this resolved, with the original three-option writeup
+removed in favor of the actual decision (redundant history isn't worth keeping once a decision is
+made - the "why" is preserved in the resolved section's own reasoning). Plaintext storage itself
+is unchanged and stays open for Phase 20, exactly as decided - this was a visibility fix, not an
+encryption one. The other Phase 19 open item (the email-existence oracle) remains genuinely open,
+not yet explicitly confirmed by the owner.

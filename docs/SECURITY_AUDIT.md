@@ -49,34 +49,25 @@ No drift risk found, confirmed both statically (every write site) and empiricall
 record's `CompanyId` matches its parent). This item is closed — no code change was needed, only
 verification, which is exactly what `§10.1` asked Phase 19 to do.
 
-### Open decision needed: `Property.AlarmAccessCode` (`DATABASE.md §10.4`)
+### Resolved: `Property.AlarmAccessCode` visibility (`DATABASE.md §10.4`)
 
-`§10.4` flagged this as needing "a deliberate Phase 19/20 decision, not an oversight." Two
-separate issues, found by reading `PropertyResponse` (`app/schemas/property.py`) and
-`properties.py`'s own route gating:
+**Decision made 2026-08-26**: narrow visibility now (cheap, closes the realistic exposure);
+defer encryption-at-rest to Phase 20 alongside the project's other production-hardening items
+(real JWT secret, `APP_DEBUG=False`, HTTPS) rather than build key management in isolation now.
 
-1. **Stored in plain text** in `Properties.AlarmAccessCode` — no encryption at rest, no
-   field-level encryption.
-2. **Visible to every company role**, including Viewer — `GET /api/properties/{id}` is
-   view-level auth (any authenticated company member), the same tier as every other property
-   field. A physical alarm/door code is a materially different sensitivity class than
-   `PropertyName` or `Postcode`, but the API doesn't currently distinguish them.
+Implemented in `property_service.can_view_alarm_code` — visible to Administrator, Manager,
+Inspector, and Maintenance (every role that does physical, in-person work at a property per
+`SCOPE.md`'s own role descriptions); redacted to `null` for Viewer, the one role explicitly
+defined as "read-only access... reports" with no field duties. Applied at the single
+`_to_response` helper in `app/api/properties.py` that every property-returning endpoint now goes
+through, rather than repeating the check per-route. Verified two ways: two new tests in
+`backend/tests/test_properties.py` (196 backend tests total), AND live against a real running
+server + the actual frontend — a Viewer's Property Detail page renders "—" for the field (the
+existing UI already handles a missing value gracefully, no frontend code changed), while an
+Administrator still sees the masked value and can reveal the real one via the existing
+show/hide toggle.
 
-Not fixed in this pass — this is a real product/scope decision, not just a code fix, since some
-roles (e.g. Maintenance workers who need physical access) plausibly *do* need this code as part
-of their job, while others (Viewer) plausibly don't. `report_service.py` already deliberately
-excludes `AlarmAccessCode` from the PDF report (a narrower, already-made call), and the frontend
-already masks it behind a password-toggle as a cosmetic mitigation (Phase 16) — but the raw value
-still round-trips through the API to any company member today.
-
-**Options, roughly cheapest to most work:**
-- Leave as-is, documented as an accepted risk for the demo/pre-launch stage (matches how
-  PropertyManager's own JWT secret placeholder was handled before its production hardening pass).
-- Restrict `AlarmAccessCode` visibility in `PropertyResponse` to Administrator/Manager only (a
-  narrower response schema or a conditional field), independent of encryption.
-- Encrypt at rest (application-level field encryption, decrypted only on the narrowed-visibility
-  path above) — the real fix if this ever becomes commercial SaaS handling real customers' door
-  codes, per `§10.4`'s own framing.
+Storage remains plain text — that half of `§10.4` stays open for Phase 20.
 
 ### Minor, accepted: cross-company email-existence oracle (consequence of `DATABASE.md §10.2`)
 

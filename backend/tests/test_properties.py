@@ -224,3 +224,76 @@ def test_deactivate_property_hides_it_from_default_list_but_not_direct_lookup(
         assert direct_lookup.status_code == 200
     finally:
         _delete_property(db_session, property_id)
+
+
+# --- AlarmAccessCode visibility (docs/SECURITY_AUDIT.md) ------------------------------------
+
+
+@pytest.fixture
+def northgate_viewer(db_session: Session) -> Generator[dict, None, None]:
+    user = make_user(
+        db_session,
+        company_name="Northgate Property Management",
+        email="test.properties.viewer.tmp@example.com",
+        role_name="Viewer",
+    )
+    yield user
+    delete_user(db_session, user)
+
+
+@pytest.fixture
+def northgate_maintenance(db_session: Session) -> Generator[dict, None, None]:
+    user = make_user(
+        db_session,
+        company_name="Northgate Property Management",
+        email="test.properties.maintenance.tmp@example.com",
+        role_name="Maintenance",
+    )
+    yield user
+    delete_user(db_session, user)
+
+
+def test_viewer_does_not_see_alarm_access_code(
+    client: TestClient, db_session: Session, northgate_admin, northgate_viewer
+) -> None:
+    create_response = client.post(
+        "/api/properties",
+        json=_create_property_payload(AlarmAccessCode="1234#"),
+        headers=auth_headers(client, northgate_admin.Email),
+    )
+    property_id = create_response.json()["PropertyId"]
+
+    try:
+        viewer_get = client.get(f"/api/properties/{property_id}", headers=auth_headers(client, northgate_viewer.Email))
+        assert viewer_get.status_code == 200
+        assert viewer_get.json()["AlarmAccessCode"] is None
+
+        viewer_list = client.get("/api/properties", headers=auth_headers(client, northgate_viewer.Email)).json()
+        listed = next(p for p in viewer_list["items"] if p["PropertyId"] == property_id)
+        assert listed["AlarmAccessCode"] is None
+    finally:
+        _delete_property(db_session, property_id)
+
+
+def test_administrator_manager_inspector_maintenance_all_see_alarm_access_code(
+    client: TestClient,
+    db_session: Session,
+    northgate_admin,
+    northgate_inspector,
+    northgate_maintenance,
+) -> None:
+    create_response = client.post(
+        "/api/properties",
+        json=_create_property_payload(AlarmAccessCode="1234#"),
+        headers=auth_headers(client, northgate_admin.Email),
+    )
+    property_id = create_response.json()["PropertyId"]
+
+    try:
+        assert create_response.json()["AlarmAccessCode"] == "1234#"
+
+        for user in (northgate_admin, northgate_inspector, northgate_maintenance):
+            response = client.get(f"/api/properties/{property_id}", headers=auth_headers(client, user.Email))
+            assert response.json()["AlarmAccessCode"] == "1234#", f"expected {user.Email} to see the real code"
+    finally:
+        _delete_property(db_session, property_id)

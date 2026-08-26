@@ -24,6 +24,16 @@ router = APIRouter(prefix="/properties", tags=["properties"])
 _manage_properties = require_roles(roles.ADMINISTRATOR, roles.MANAGER)
 
 
+def _to_response(property_, current_user: User) -> PropertyResponse:
+    """The one place PropertyResponse gets built, so AlarmAccessCode redaction
+    (property_service.can_view_alarm_code, docs/SECURITY_AUDIT.md) can't be forgotten on a
+    future endpoint the way a copy-pasted model_validate() call could be."""
+    response = PropertyResponse.model_validate(property_)
+    if not property_service.can_view_alarm_code(current_user):
+        response = response.model_copy(update={"AlarmAccessCode": None})
+    return response
+
+
 @router.get("", response_model=PaginatedResponse[PropertyResponse])
 def list_properties(
     page: int = Query(default=1, ge=1),
@@ -46,7 +56,7 @@ def list_properties(
         include_inactive=include_inactive,
     )
     return PaginatedResponse(
-        items=[PropertyResponse.model_validate(p) for p in items],
+        items=[_to_response(p, current_user) for p in items],
         total=total,
         page=page,
         page_size=page_size,
@@ -60,7 +70,7 @@ def get_property(
     db: Session = Depends(get_db),
 ) -> PropertyResponse:
     property_ = property_service.get_property(db, current_user, property_id)
-    return PropertyResponse.model_validate(property_)
+    return _to_response(property_, current_user)
 
 
 @router.post("", response_model=PropertyResponse, status_code=201)
@@ -70,7 +80,7 @@ def create_property(
     db: Session = Depends(get_db),
 ) -> PropertyResponse:
     property_ = property_service.create_property(db, current_user, payload)
-    return PropertyResponse.model_validate(property_)
+    return _to_response(property_, current_user)
 
 
 @router.patch("/{property_id}", response_model=PropertyResponse)
@@ -81,7 +91,7 @@ def update_property(
     db: Session = Depends(get_db),
 ) -> PropertyResponse:
     property_ = property_service.update_property(db, current_user, property_id, payload)
-    return PropertyResponse.model_validate(property_)
+    return _to_response(property_, current_user)
 
 
 @router.post("/{property_id}/deactivate", response_model=PropertyResponse)
@@ -91,4 +101,4 @@ def deactivate_property(
     db: Session = Depends(get_db),
 ) -> PropertyResponse:
     property_ = property_service.deactivate_property(db, current_user, property_id)
-    return PropertyResponse.model_validate(property_)
+    return _to_response(property_, current_user)

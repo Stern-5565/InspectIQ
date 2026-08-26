@@ -8,6 +8,20 @@ from app.models.property import Property
 from app.models.user import User
 from app.repositories import property_repository as repo
 from app.schemas.property import PropertyCreate, PropertyUpdate
+from app.security import roles
+
+# docs/DATABASE.md §10.4 / docs/SECURITY_AUDIT.md - AlarmAccessCode is a physical door/alarm
+# code, a materially more sensitive field than the rest of a Property record. Every role that
+# does physical, in-person work at a property (per SCOPE.md's own role descriptions - Inspector
+# "conducts inspections," Maintenance "updates status... uploads completion photos" on-site)
+# plausibly needs it to get in; Viewer is explicitly "read-only access... reports" with no
+# field role at all, so it's the one role this excludes.
+_CAN_VIEW_ALARM_CODE = {roles.ADMINISTRATOR, roles.MANAGER, roles.INSPECTOR, roles.MAINTENANCE}
+
+
+def can_view_alarm_code(current_user: User) -> bool:
+    user_role_names = {role.RoleName for role in current_user.roles}
+    return bool(user_role_names & _CAN_VIEW_ALARM_CODE)
 
 
 def _to_plain(value: Any) -> Any:
