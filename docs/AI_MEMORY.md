@@ -2391,5 +2391,10 @@ set back to `null`) afterward, both standalone-server processes stopped cleanly.
 removed in favor of the actual decision (redundant history isn't worth keeping once a decision is
 made - the "why" is preserved in the resolved section's own reasoning). Plaintext storage itself
 is unchanged and stays open for Phase 20, exactly as decided - this was a visibility fix, not an
-encryption one. The other Phase 19 open item (the email-existence oracle) remains genuinely open,
-not yet explicitly confirmed by the owner.
+encryption one.
+
+**The remaining Phase 19 open item (the cross-company email-existence oracle on
+`POST /api/users`) was explicitly accepted as-is by the owner the same session, no code
+change.** `docs/SECURITY_AUDIT.md` updated to mark it resolved. This closes out every open item
+from the Phase 19 audit - only Phase 20 (deployment) remains on the original 20-phase plan, with
+no specific next step chosen yet.

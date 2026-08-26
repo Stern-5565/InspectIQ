@@ -1567,9 +1567,10 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
    (security audit) are all now FULLY COMPLETE and committed.** See the "What has been completed"
    section above for each module's own detail, and `docs/AI_MEMORY.md`'s dated entries for the
    full design/build history.
-3. **One decision remains genuinely open**: the cross-company email-existence oracle
-   (`docs/SECURITY_AUDIT.md`) - almost certainly fine to accept as-is, but flagged, not yet
-   explicitly confirmed by the owner. AlarmAccessCode is resolved (see above).
+3. **Both Phase 19 open decisions are now resolved (owner confirmed 2026-08-26).**
+   AlarmAccessCode visibility was narrowed and implemented (see above); the cross-company
+   email-existence oracle on user creation was explicitly accepted as-is, no code change -
+   `docs/SECURITY_AUDIT.md` updated to reflect both as closed.
 4. **Only Phase 20 (deployment) remains on the original 20-phase plan.** Don't start it without
    confirming with the owner first - every phase gate in this project so far has stopped for
    review, not run unattended into the next one.

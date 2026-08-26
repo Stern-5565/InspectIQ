@@ -69,7 +69,10 @@ show/hide toggle.
 
 Storage remains plain text — that half of `§10.4` stays open for Phase 20.
 
-### Minor, accepted: cross-company email-existence oracle (consequence of `DATABASE.md §10.2`)
+### Resolved: cross-company email-existence oracle (consequence of `DATABASE.md §10.2`)
+
+**Decision made 2026-08-26: accepted as-is, no code change.** Owner confirmed after reviewing
+the finding.
 
 `user_service.create_user` checks email uniqueness globally (`user_repository.get_user_by_email`,
 no company filter — correct, since `Users.Email` is a real global-unique DB constraint, `§10.2`'s
@@ -77,8 +80,8 @@ own already-documented tradeoff). The practical side effect: an Administrator at
 learn whether an arbitrary email is already registered *anywhere*, including at a competitor
 company, via the "A user with this email already exists" `409` on `POST /api/users`. Low
 severity — it requires an authenticated Administrator (not an anonymous prober), and email
-existence alone leaks no other data. Noted as a documented consequence of an already-accepted
-tradeoff, not a new independent gap; not changed in this pass.
+existence alone leaks no other data. Documented consequence of an already-accepted tradeoff, not
+a new independent gap.
 
 ### Informational: three schema tables have zero application code
 
@@ -102,4 +105,6 @@ Every module's own per-file tests already cover role-based authorization (Admin-
 Inspector tiers) exhaustively — that's a different guarantee from company isolation and wasn't
 the target of this pass. Phase 18 already covered token forgery, mass-assignment, and injection
 safety. This phase's job was specifically: does a real record ever leak or accept writes across
-a company boundary — and per the findings above, no, with two decisions still open for the owner.
+a company boundary — and per the findings above, no. Both open decisions above have since been
+resolved by the owner (2026-08-26): AlarmAccessCode visibility narrowed to roles doing physical
+property work, and the email-existence oracle accepted as-is.
