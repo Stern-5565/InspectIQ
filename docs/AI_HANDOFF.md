@@ -1520,22 +1520,43 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
   concurrency-shaped. All 188 backend tests (155 original + 33 new) pass; the DB was confirmed
   clean of leftover test rows after the full run.
 
+- **Phase 19 (dedicated cross-company security audit) is done, written up in
+  `docs/SECURITY_AUDIT.md`.** Owner explicitly chose Phase 19 next. Full methodology and findings
+  live in that file, not duplicated here - summary: (1) static review of every route (60+
+  endpoints, all correctly auth-gated), every repository query (all correctly company-filtered),
+  and every `CompanyId=` write site (all six derive it from `current_user.CompanyId`, never
+  client input) - this directly resolves `DATABASE.md §10.1`'s flagged denormalized-`CompanyId`
+  drift risk, no code change needed, only verification; (2) new
+  `backend/tests/test_security_audit.py` (6 tests) builds one full "universe" of real records
+  across every entity type, all genuinely owned by Northgate, then proves a real Bright Spaces
+  Administrator gets a clean 404 - never 403 - on all 30 read/mutate attempts AND all 6
+  create-under-a-foreign-parent attempts against them; found and fixed an FK-delete-order bug in
+  the test's OWN cleanup while getting it green (not an app bug). 194 backend tests total (188 +
+  6). **Two real findings, both left as open decisions rather than silently fixed or silently
+  ignored** (see `docs/SECURITY_AUDIT.md` for full reasoning): `Property.AlarmAccessCode` is
+  stored in plain text AND visible to every company role including Viewer (`DATABASE.md §10.4`'s
+  own flagged item, explicitly deferred to "a Phase 19/20 decision" since Phase 1) - needs the
+  owner to decide whether to narrow visibility, encrypt at rest, both, or accept the risk for now;
+  and a minor cross-company email-existence oracle on `POST /api/users` (an authenticated-
+  Administrator-only side effect of the already-accepted `Users.Email` global-uniqueness
+  tradeoff, `§10.2`) - almost certainly fine to accept as-is, flagged for completeness. Also noted
+  informationally: `Notes`/`Notifications`/`AuditLogs` have zero application code yet (no risk
+  since nothing touches them), and there's no login rate-limiting (a Phase 20 deployment-hardening
+  candidate, not a regression).
+
 ## Next tasks
 
-1. Commit this batch (Phase 18: adversarial testing pass + the double-submit race fix) to git.
-2. **Phase 16 (all pages), Phase 17 (PDF reports), and Phase 18 (adversarial testing) are all now
-   FULLY COMPLETE and committed.** See the "What has been completed" section above for each
-   module's own detail, and `docs/AI_MEMORY.md`'s dated entries for the full design/build history.
-3. **No specific next phase has been chosen yet - this is a real, open decision for the next
-   session, not something to default into.** Per `PROJECT_PLAN.md §11`'s own 20-phase table,
-   what remains is **Phase 19** (an explicit, dedicated cross-company security audit, scope §20 -
-   isolation has been spot-checked live in nearly every module's own session and Phase 18's IDOR
-   sweep added a systematic pass across 10 endpoints, but no single dedicated audit document
-   exists yet) and **Phase 20** (deployment, live end-to-end, the same checklist discipline
-   PropertyManager's own deployment used). Don't assume either is "next" without confirming with
-   the owner first - every phase gate in this project so far has stopped for review, not run
-   unattended into the next one.
-4. **Patterns worth carrying into whatever's next**, confirmed repeatedly across the whole
+1. Commit this batch (Phase 19: cross-company security audit) to git.
+2. **Phase 16 (all pages), Phase 17 (PDF reports), Phase 18 (adversarial testing), and Phase 19
+   (security audit) are all now FULLY COMPLETE and committed.** See the "What has been completed"
+   section above for each module's own detail, and `docs/AI_MEMORY.md`'s dated entries for the
+   full design/build history.
+3. **The two open decisions in `docs/SECURITY_AUDIT.md` (AlarmAccessCode handling, the email-
+   oracle acceptance) are real product calls for the owner, not something to default into.**
+4. **Only Phase 20 (deployment) remains on the original 20-phase plan.** Don't start it without
+   confirming with the owner first - every phase gate in this project so far has stopped for
+   review, not run unattended into the next one.
+5. **Patterns worth carrying into whatever's next**, confirmed repeatedly across the whole
    Phase-16/17 stretch: read the relevant `_service.py`/`_repository.py`/`_api.py` files FIRST,
    every time, before assuming a backend gap exists OR assuming one doesn't - the answer went
    every direction (Maintenance/Cleaning/Vacant Units needed real gaps closed; Risk Register/

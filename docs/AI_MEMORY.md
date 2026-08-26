@@ -2277,3 +2277,75 @@ endpoints, but no single dedicated audit document exists yet) and Phase 20 (depl
 specific next phase has been chosen - an open decision for a future session, per this project's
 own standing rule of stopping for review at every phase gate rather than running unattended into
 the next one.
+
+## 2026-08-26 — Phase 19 (dedicated cross-company security audit) built: four write sites checked by hand, one consolidated "universe" test, two real findings left as open decisions rather than fixed unilaterally
+
+Owner picked Phase 19 explicitly when asked (the last remaining choice besides Phase 20).
+Distinct from Phase 18's adversarial pass, whose IDOR sweep only proved isolation against
+*nonexistent* ids - Phase 19's actual charter, straight from `DATABASE.md §10.1`/`§10.4`, is
+narrower and more specific: verify the denormalized-`CompanyId` drift risk never materializes in
+practice, and make the AlarmAccessCode decision those sections explicitly deferred to this
+phase rather than deciding unilaterally back in Phase 1/2.
+
+**Static review, three passes**: read every route across all 16 `app/api/*.py` files (60+
+endpoints) and confirmed every one depends on `get_current_user` or `require_roles` except the
+three that should be public (`/auth/login`, `/auth/refresh`, `/health`) - no missing-auth gap
+anywhere. Read every repository function and confirmed every company-scoped query filters by
+`company_id`, either directly (tables with their own `CompanyId`) or via a join through
+`Property`/`Inspection` (tables without one) - the pattern each repository's own module
+docstring already claims, now independently re-verified rather than trusted from memory. Grepped
+every service for `CompanyId=` (the only place a new record's company is ever set) - all six
+write sites (`maintenance_service`, `media_service`, `property_service`, `risk_service` ×2,
+`user_service`) derive it from `current_user.CompanyId`, never client input. This is the actual
+resolution of `§10.1`'s flagged drift risk: no code change was needed, the mitigation was already
+correctly applied everywhere, Phase 19's job was confirming that with fresh eyes rather than
+inheriting the earlier phases' own confidence in themselves.
+
+**New `backend/tests/test_security_audit.py` (6 tests) is the empirical half.** Builds one full
+"universe" of real records spanning every entity type this app exposes - Property, Unit,
+CleaningArea, Inspection+response, MaintenanceIssue, RiskAssessment, CleaningInspection,
+VacantUnitInspection, MeterReading, MediaFile - all genuinely owned by Northgate, created
+through real HTTP calls (not direct DB inserts, so it goes through exactly the derivation being
+audited). Then, as a real Bright Spaces Administrator: one parametrized-style test attempts to
+read or mutate all 30 of those real records across every relevant endpoint (never 403, always
+404 - the project's "indistinguishable from nonexistent" rule, unbroken); a second attempts to
+create a child record under six of Northgate's real parents (planting a unit into their
+property, a grade into their inspection, etc.) - also always 404, before any row is written; a
+third confirms every created record's denormalized `CompanyId` matches its parent's exactly
+(the empirical proof for the static-review finding above).
+
+**Writing this file hit the exact same class of bug Phase 18's adversarial tests hit twice
+already - a test cleanup FK-order mistake, not an app bug**: the universe fixture's teardown
+deleted a MeterReading's photo `MediaFile` before deleting the `MeterReading` row that
+references it via `PhotoMediaFileId` (no ORM `relationship()` exists on that FK, so SQLAlchemy
+can't infer delete order automatically the way it can for mapped relationships) - a real
+`FK_MeterReadings_MediaFiles` violation, caught immediately, fixed by deleting the reading first
+and its photo second. **Third time this exact category of mistake has shown up in this
+project's own test-writing** (Phase 18: `MaintenanceUpdates`-before-`MaintenanceIssues`,
+`CleaningAreas`-before-`Properties`; now this) - worth naming as a standing pattern: any new test
+file that creates real linked records needs to work out FK delete order from the schema BEFORE
+writing cleanup code, not discover it by hitting `IntegrityError`s one at a time. 194 backend
+tests total (188 + 6), full suite reruns clean, DB confirmed free of leftover test rows
+afterward.
+
+**Two real findings, written up in full in the new `docs/SECURITY_AUDIT.md` rather than fixed
+silently or ignored** - both are genuine product decisions, not obvious code fixes, so both are
+left open for the owner rather than guessed at: (1) `Property.AlarmAccessCode` - a physical
+door/alarm code - is stored in plain text AND returned to every company role including Viewer via
+`PropertyResponse`, not just Administrator/Manager; `DATABASE.md §10.4` named this exact tension
+back in Phase 1 and explicitly said it needed "a deliberate Phase 19/20 decision," not a silent
+default either direction, so it stays open rather than being narrowed or encrypted unilaterally -
+some roles (Maintenance, doing physical work) plausibly need it, Viewer plausibly doesn't, and
+that's a real scope call. (2) A minor, lower-priority side effect of the ALREADY-accepted
+`Users.Email` global-uniqueness tradeoff (`§10.2`): `POST /api/users`'s duplicate-email check
+lets an authenticated Administrator learn whether an email exists at ANY company, not just their
+own - flagged for completeness, almost certainly fine to accept as-is given it needs an
+authenticated Administrator to exploit at all. Also noted informationally, not as gaps requiring
+action: `Notes`/`Notifications`/`AuditLogs` have zero application code yet (real tables since
+Phase 2, but nothing reads/writes them, so no risk currently exists to audit), and there's no
+login rate-limiting (a Phase 20 deployment-hardening candidate, not a regression from anything).
+
+**This closes out Phase 19.** Per `PROJECT_PLAN.md §11`, only Phase 20 (deployment) remains on
+the original 20-phase plan. No specific next step chosen - an open decision for a future
+session, and the two AlarmAccessCode/email-oracle decisions in `docs/SECURITY_AUDIT.md` are
+themselves open items the owner needs to weigh in on before Phase 20, not things to default into.
