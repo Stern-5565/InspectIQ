@@ -2398,3 +2398,84 @@ encryption one.
 change.** `docs/SECURITY_AUDIT.md` updated to mark it resolved. This closes out every open item
 from the Phase 19 audit - only Phase 20 (deployment) remains on the original 20-phase plan, with
 no specific next step chosen yet.
+
+## 2026-08-26 — Phase 20 (deployment) started: repo prep done, no real Azure resources touched yet, mirroring PropertyManager's own step-at-a-time discipline deliberately
+
+Owner said "Start Phase 20" - the last item on the original 20-phase plan. PROJECT_PLAN.md §11
+names this "same checklist discipline as PropertyManager" explicitly, so the very first thing
+done was read `propertymanager-status` memory's own deployment section in full before writing
+any code - not to copy blindly, but because PropertyManager's session already paid for several
+real, hard-won lessons (the `msodbcsql17`→`msodbcsql18` TLS hang, `libgssapi-krb5-2` getting
+silently autoremoved, the SPA-routing 404 gap, the CSP `VITE_API_ORIGIN`-vs-`VITE_API_BASE_URL`
+exact-match bug) that would be a real waste to rediscover live against this project instead of
+just applying from the start.
+
+**Deliberately did NOT start provisioning any real Azure resources this turn.** PropertyManager's
+own memory is explicit that the owner chose to pause before every real-cost step there ("each
+remaining step needs individual confirmation, not one unattended run") - the safest read of
+"start Phase 20" is "begin the phase," not "spend money and stand up public infrastructure
+without discussing it first." Did the free, local, fully reversible prep work instead, then
+wrote `docs/DEPLOYMENT_GUIDE.md` (mirroring PropertyManager's own `deployment-guide.md`
+structure) as the actual plan to review before any provisioning begins.
+
+**`backend/Dockerfile` + `.dockerignore`** - adapted directly from PropertyManager's own
+Dockerfile rather than written from scratch, since it's the exact same stack (FastAPI +
+SQLAlchemy + pyodbc + Azure SQL) and PropertyManager's version already encodes three real,
+independently-discovered bugs as comments (msodbcsql18-not-17, the `apt-mark manual
+libgssapi-krb5-2` line, why `.env` is never copied in). Confirmed the reasoning still applies
+unchanged before reusing it, not assumed. Not build-tested locally - `docker --version` works on
+this machine but the daemon isn't running (`Docker Desktop.exe` isn't even installed at its
+usual path) - same situation PropertyManager's own session was in for its first Dockerfile. The
+real first build test will be `az acr build` (a remote build needing no local Docker) once ACR
+exists, exactly how PropertyManager's own Dockerfile got verified.
+
+**New `AzureBlobStorageService` in `app/services/media_storage.py` - the one genuinely new piece
+this deployment needs that PropertyManager's never did**, since PropertyManager has no file
+uploads at all. Implements `IMediaStorageService` (the same Protocol `LocalFileStorageService`
+already satisfies) using the real `azure-storage-blob` SDK, installed and confirmed importable
+in the local `.venv`. Kept the exact same `storage_key` shape (`entity_type/entity_id/uuid.ext`)
+LocalFileStorageService already uses - `MediaFiles.StorageKey` has no format assumption baked in
+anywhere else in the app, so nothing else needed to change to support a second backend.
+`get_storage_service()` picks between the two via one new setting, `MEDIA_STORAGE_PROVIDER`
+("local" default / "azure_blob") - the entire production cutover is flipping that one value plus
+supplying the two Azure settings, nothing else in `media_service.py` or the API layer knows or
+cares which one is active, exactly as the Protocol was designed to allow back in Phase 9.
+
+**A real, deliberate design choice worth remembering if this file is ever touched again**:
+`get_url()` returns `None` from BOTH implementations, even now that blob storage - which
+genuinely COULD hand out a signed URL - exists. Tempting to "improve" by returning a real SAS
+URL for the blob case, since that's the more typical blob-storage pattern. Not done on purpose:
+`download_media` (app/api/media.py) proxies every download through the already-authenticated API
+specifically so InspectIQ's own per-request permission checks (parent-entity authorization,
+company isolation) can't be bypassed by handing out a URL that skips them - the Phase 9 module
+docstring's whole point. A signed URL would reintroduce exactly the gap that design decision
+closed. `get_url` stays on the Protocol only as a deliberately-unused escape hatch for a future
+genuinely-public use case, not dead code by oversight.
+
+**`app/core/config.py` gained a new fail-fast startup guard**, same shape as the existing
+JWT-secret-placeholder one: `MEDIA_STORAGE_PROVIDER=azure_blob` without both
+`AZURE_STORAGE_CONNECTION_STRING`/`AZURE_STORAGE_CONTAINER_NAME` set refuses to start rather than
+letting a misconfigured storage backend surface as a confusing runtime error on a user's first
+upload in production. +4 new tests in `test_config.py`, mirroring the existing JWT-guard test
+file's own structure exactly (reject-without-A, reject-without-B, accept-with-both,
+default-unaffected).
+
+**`frontend/public/staticwebapp.config.json` created proactively, not reactively** - checked
+whether InspectIQ's frontend even had a `public/` directory (it didn't - none existed at all)
+before assuming the SPA-routing gap PropertyManager found live in production also existed here.
+It did (Vite/Static Web Apps' behavior is identical regardless of which app is deployed), so
+fixed it now rather than waiting to rediscover the same 404 in InspectIQ's own future production
+deployment. **Verified with a real `npm run build`**, not assumed to work from copying the file:
+confirmed `staticwebapp.config.json` actually lands in `dist/` (Vite copies `public/` verbatim)
+and, as a bonus confirmation while already looking at the build output, confirmed the built CSS
+is a genuine external `<link rel="stylesheet">` tag, not an inline HMR one - the exact
+distinction Phase 16's own CSP work already cared about, now re-confirmed against a real
+production build rather than assumed unchanged since then.
+
+200 backend tests total (196 + 4), full suite reruns clean. Nothing in Azure has been created -
+every change this session lives entirely in the repo, free and fully reversible. Full plan for
+what comes next (resource group, Azure SQL, ACR, Blob Storage, Container Apps, Static Web Apps,
+CORS wiring, the real Administrator account, the post-deployment checklist) is written out in
+`docs/DEPLOYMENT_GUIDE.md`'s "Execution order" section, each step marked to pause for explicit
+confirmation before it runs - not started yet, an open decision for the owner on how they want
+to proceed.

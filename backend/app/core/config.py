@@ -38,12 +38,17 @@ class Settings(BaseSettings):
 
     CORS_ALLOWED_ORIGINS: str = "http://localhost:5173"
 
-    # Phase 9 (Media). Local filesystem now (PROJECT_PLAN.md §8) - relative to backend/ unless
-    # an absolute path is given. Gitignored (backend/uploads/ in .gitignore already, added
-    # proactively back in Phase 1).
+    # Phase 9 (Media) / Phase 20 (Deployment). "local" (default, dev) or "azure_blob" (prod,
+    # app/services/media_storage.py's AzureBlobStorageService) - swapping this one setting is
+    # the entire production cutover, nothing else in the app knows which one is active.
+    MEDIA_STORAGE_PROVIDER: str = "local"
+    # Local filesystem - relative to backend/ unless an absolute path is given. Gitignored
+    # (backend/uploads/ in .gitignore already, added proactively back in Phase 1).
     MEDIA_UPLOAD_DIR: str = "uploads"
     MEDIA_MAX_IMAGE_SIZE_BYTES: int = 15 * 1024 * 1024
     MEDIA_MAX_VIDEO_SIZE_BYTES: int = 250 * 1024 * 1024
+    AZURE_STORAGE_CONNECTION_STRING: str | None = None
+    AZURE_STORAGE_CONTAINER_NAME: str | None = None
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
@@ -53,6 +58,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "JWT_SECRET_KEY must be a real, sufficiently long secret when APP_ENV is not "
                 "'development'. Refusing to start with the placeholder or a short value."
+            )
+        if self.MEDIA_STORAGE_PROVIDER == "azure_blob" and (
+            not self.AZURE_STORAGE_CONNECTION_STRING or not self.AZURE_STORAGE_CONTAINER_NAME
+        ):
+            raise ValueError(
+                "AZURE_STORAGE_CONNECTION_STRING and AZURE_STORAGE_CONTAINER_NAME are required "
+                "when MEDIA_STORAGE_PROVIDER=azure_blob. Same fail-fast-at-startup principle as "
+                "the JWT secret guard above - a misconfigured storage backend should never be "
+                "discovered by a user's first upload failing in production."
             )
         return self
 

@@ -1560,21 +1560,59 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
   existing show/hide toggle. Test data reverted afterward. `docs/SECURITY_AUDIT.md` updated to
   mark this resolved - plaintext storage itself stays open for Phase 20, as decided.
 
+- **Phase 20 (deployment) started - repo prep done, NOTHING provisioned in Azure yet.** Owner
+  chose Phase 20 next. Full plan in `docs/DEPLOYMENT_GUIDE.md` (read that first when resuming,
+  same pattern as PropertyManager's `documentation/deployment-guide.md`) - architecture, resource
+  naming, every step, environment variables, post-deployment checklist, and an explicit
+  execution order with a pause point before each real (costs-money) provisioning step, mirroring
+  the exact discipline the owner chose for PropertyManager's own deployment ("each step needs
+  individual confirmation, not one unattended run").
+  - `backend/Dockerfile` + `.dockerignore` - adapted directly from PropertyManager's own,
+    already-battle-tested Dockerfile (same `python:3.14-slim-bookworm` base, same
+    `msodbcsql18`/`libgssapi-krb5-2` fix baked in from the start rather than rediscovered live).
+    **Not build-tested** - Docker CLI is present on this machine but its daemon isn't running
+    (same gap PropertyManager's session had); the real first build test happens via
+    `az acr build` (needs no local Docker) once ACR is provisioned.
+  - New `app/services/media_storage.py::AzureBlobStorageService` - the one genuinely new piece
+    this project needs that PropertyManager never did (real file uploads). Implements
+    `IMediaStorageService` exactly like `LocalFileStorageService` does; `get_storage_service()`
+    picks between them via one new setting, `MEDIA_STORAGE_PROVIDER` ("local"/"azure_blob").
+    Lazily imports the Azure SDK inside `__init__`, not at module level, so importing this file
+    (e.g. for tests) never requires `azure-storage-blob` to be installed unless the Azure
+    implementation is actually instantiated. `get_url` still returns `None` from BOTH
+    implementations even in the blob-storage world - a deliberate choice, not an oversight: a
+    signed/public blob URL would let a client bypass this app's own per-request permission
+    check, the whole reason `download_media` proxies bytes through the authenticated API instead
+    of redirecting to storage directly (see the module's own docstring).
+  - `app/core/config.py` gained `MEDIA_STORAGE_PROVIDER`/`AZURE_STORAGE_CONNECTION_STRING`/
+    `AZURE_STORAGE_CONTAINER_NAME`, plus a new fail-fast startup guard (same principle as the
+    existing JWT-secret placeholder guard): `MEDIA_STORAGE_PROVIDER=azure_blob` without both
+    Azure values set refuses to start, rather than letting a misconfigured storage backend get
+    discovered by a user's first upload failing in production. +4 tests in `test_config.py`.
+  - `frontend/public/staticwebapp.config.json` created proactively - InspectIQ's frontend had no
+    `public/` directory at all yet. This is the exact SPA-routing fix PropertyManager only
+    discovered live in production (direct navigation to a non-root route 404s from Static Web
+    Apps without it) - closed here ahead of time instead of waiting to rediscover it the same
+    way. **Verified with a real `npm run build`**, not just "should work": confirmed the file
+    lands in `dist/` (Vite copies `public/` verbatim) and confirmed the built CSS is a real
+    external `<link rel="stylesheet">`, not an inline HMR tag (the same distinction Phase 16's
+    own CSP verification checked).
+  - 200 backend tests total (196 + 4). Nothing in Azure has been created - every step above is
+    free, local, and reversible.
+
 ## Next tasks
 
-1. Commit this batch (Phase 19: cross-company security audit + the AlarmAccessCode visibility fix) to git.
+1. Commit this batch (Phase 20 repo prep: Dockerfile, AzureBlobStorageService, deployment guide) to git.
 2. **Phase 16 (all pages), Phase 17 (PDF reports), Phase 18 (adversarial testing), and Phase 19
    (security audit) are all now FULLY COMPLETE and committed.** See the "What has been completed"
    section above for each module's own detail, and `docs/AI_MEMORY.md`'s dated entries for the
    full design/build history.
-3. **Both Phase 19 open decisions are now resolved (owner confirmed 2026-08-26).**
-   AlarmAccessCode visibility was narrowed and implemented (see above); the cross-company
-   email-existence oracle on user creation was explicitly accepted as-is, no code change -
-   `docs/SECURITY_AUDIT.md` updated to reflect both as closed.
-4. **Only Phase 20 (deployment) remains on the original 20-phase plan.** Don't start it without
-   confirming with the owner first - every phase gate in this project so far has stopped for
-   review, not run unattended into the next one.
-5. **Patterns worth carrying into whatever's next**, confirmed repeatedly across the whole
+3. **Phase 20's actual Azure provisioning has NOT started.** `docs/DEPLOYMENT_GUIDE.md`'s
+   "Execution order" section lists each remaining step (resource group + Azure SQL, ACR + image
+   build, Blob Storage, Container Apps, Static Web Apps, CORS wiring, real Administrator account,
+   post-deployment checklist) - each needs its own explicit confirmation before running, same as
+   PropertyManager. Don't provision anything without asking first.
+4. **Patterns worth carrying into whatever's next**, confirmed repeatedly across the whole
    Phase-16/17 stretch: read the relevant `_service.py`/`_repository.py`/`_api.py` files FIRST,
    every time, before assuming a backend gap exists OR assuming one doesn't - the answer went
    every direction (Maintenance/Cleaning/Vacant Units needed real gaps closed; Risk Register/

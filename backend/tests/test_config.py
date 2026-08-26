@@ -55,3 +55,42 @@ def test_cors_origins_list_splits_and_strips() -> None:
         CORS_ALLOWED_ORIGINS="http://localhost:5173, http://localhost:3000",
     )
     assert s.cors_origins_list == ["http://localhost:5173", "http://localhost:3000"]
+
+
+# --- MEDIA_STORAGE_PROVIDER guard (Phase 20) -------------------------------------------------
+
+
+def test_azure_blob_provider_without_connection_string_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            DB_SERVER="test-server",
+            DB_NAME="test-db",
+            MEDIA_STORAGE_PROVIDER="azure_blob",
+            AZURE_STORAGE_CONTAINER_NAME="media",
+        )
+
+
+def test_azure_blob_provider_without_container_name_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            DB_SERVER="test-server",
+            DB_NAME="test-db",
+            MEDIA_STORAGE_PROVIDER="azure_blob",
+            AZURE_STORAGE_CONNECTION_STRING="fake-connection-string",
+        )
+
+
+def test_azure_blob_provider_with_both_values_allowed() -> None:
+    s = Settings(
+        DB_SERVER="test-server",
+        DB_NAME="test-db",
+        MEDIA_STORAGE_PROVIDER="azure_blob",
+        AZURE_STORAGE_CONNECTION_STRING="fake-connection-string",
+        AZURE_STORAGE_CONTAINER_NAME="media",
+    )
+    assert s.MEDIA_STORAGE_PROVIDER == "azure_blob"
+
+
+def test_local_provider_default_unaffected_by_azure_guard() -> None:
+    s = Settings(DB_SERVER="test-server", DB_NAME="test-db")
+    assert s.MEDIA_STORAGE_PROVIDER == "local"
