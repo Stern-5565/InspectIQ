@@ -1560,13 +1560,50 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
   existing show/hide toggle. Test data reverted afterward. `docs/SECURITY_AUDIT.md` updated to
   mark this resolved - plaintext storage itself stays open for Phase 20, as decided.
 
-- **Phase 20 (deployment) started - repo prep done, NOTHING provisioned in Azure yet.** Owner
-  chose Phase 20 next. Full plan in `docs/DEPLOYMENT_GUIDE.md` (read that first when resuming,
-  same pattern as PropertyManager's `documentation/deployment-guide.md`) - architecture, resource
-  naming, every step, environment variables, post-deployment checklist, and an explicit
-  execution order with a pause point before each real (costs-money) provisioning step, mirroring
-  the exact discipline the owner chose for PropertyManager's own deployment ("each step needs
-  individual confirmation, not one unattended run").
+- **Phase 20 (deployment) is COMPLETE - InspectIQ is live.** Owner chose Phase 20, then
+  confirmed each provisioning step individually as it happened (same discipline as
+  PropertyManager's own deployment - never one unattended run). Full detail, exact resource
+  names, and the complete post-deployment checklist results are in `docs/DEPLOYMENT_GUIDE.md`
+  (read that first when resuming this project) - not duplicated here beyond the summary below.
+
+  **Live URLs**: frontend `https://brave-moss-06f7dda03.7.azurestaticapps.net`, backend
+  `https://inspectiq-api.orangesky-00064908.uksouth.azurecontainerapps.io`. Real Administrator
+  account: `shmillystern@gmail.com` / Company "InspectIQ Demo". Production holds exactly that
+  one Company and one User - every verification record created during deployment testing (a
+  test Property, its Inspection, 102 responses, 2 photos) was created, verified, then fully
+  cleaned up afterward, confirmed via `az storage blob list` that the underlying blobs were
+  genuinely gone too, not just the DB rows.
+
+  **Two ACR/storage-account naming collisions hit and resolved, worth remembering if this ever
+  needs recreating**: `inspectiqacr` and `inspectiqstorage` were both already taken globally
+  (these Azure resource types have GLOBAL name uniqueness across every Azure customer, not just
+  this subscription) - used `inspectiqacrshmuelstern`/`inspectiqstorageshm` instead. Also hit
+  `Microsoft.Storage` provider not registered on this subscription (a fresh-subscription gotcha,
+  same category as the `Microsoft.ContainerRegistry` one PropertyManager hit once) - fixed with
+  `az provider register -n Microsoft.Storage`, ~60s to complete.
+
+  **Backend worked end-to-end on the very first deployment attempt** - no `msodbcsql17` TLS
+  hang, no `libgssapi-krb5-2` removal, no missing `Encrypt=yes` - because all three of
+  PropertyManager's hard-won bugs were built into `backend/Dockerfile`/`config.py` from the
+  start this time instead of being rediscovered live. Also explicitly wired liveness/readiness
+  probes against `/api/health` at creation time, closing a gap PropertyManager's own deployment
+  left unaddressed (confirmed via `propertymanager-status` memory: `probes: null` there).
+
+  **The one genuinely new piece this deployment needed beyond PropertyManager's own template -
+  Azure Blob Storage for real file uploads - was verified for real, not assumed**: uploaded a
+  photo through the actual live browser UI (a programmatically-constructed `File` +
+  `DataTransfer`, since headless file-picker dialogs aren't drivable in this environment) and
+  downloaded it back via the real API, confirming a genuine byte-for-byte match.
+
+  **One real, transient false alarm worth remembering, not a bug**: right after updating
+  `CORS_ALLOWED_ORIGINS` on the live Container App, the very first browser-side retry hit a real
+  CORS error before the new revision had fully taken over 100% of traffic - confirmed via a
+  direct `curl -X OPTIONS` preflight that the backend's config was already correct, and a retry
+  a few seconds later through the real UI succeeded cleanly. Worth a short pause after any
+  `containerapp update` before trusting an immediate browser-side check.
+
+- Older Phase 20 repo-prep detail (kept for the historical record; superseded by "COMPLETE"
+  above once provisioning actually happened):
   - `backend/Dockerfile` + `.dockerignore` - adapted directly from PropertyManager's own,
     already-battle-tested Dockerfile (same `python:3.14-slim-bookworm` base, same
     `msodbcsql18`/`libgssapi-krb5-2` fix baked in from the start rather than rediscovered live).
@@ -1602,16 +1639,24 @@ standalone API route's role gate doesn't need to be the ONLY way to reach that s
 
 ## Next tasks
 
-1. Commit this batch (Phase 20 repo prep: Dockerfile, AzureBlobStorageService, deployment guide) to git.
-2. **Phase 16 (all pages), Phase 17 (PDF reports), Phase 18 (adversarial testing), and Phase 19
-   (security audit) are all now FULLY COMPLETE and committed.** See the "What has been completed"
-   section above for each module's own detail, and `docs/AI_MEMORY.md`'s dated entries for the
-   full design/build history.
-3. **Phase 20's actual Azure provisioning has NOT started.** `docs/DEPLOYMENT_GUIDE.md`'s
-   "Execution order" section lists each remaining step (resource group + Azure SQL, ACR + image
-   build, Blob Storage, Container Apps, Static Web Apps, CORS wiring, real Administrator account,
-   post-deployment checklist) - each needs its own explicit confirmation before running, same as
-   PropertyManager. Don't provision anything without asking first.
+1. **Every phase (1 through 20) is now committed and pushed to `origin/main`.** InspectIQ is
+   live in production - see the Phase 20 summary above and `docs/DEPLOYMENT_GUIDE.md` for full
+   detail, resource names, and the completed post-deployment checklist.
+2. **Nothing from the original scope doc's 20-phase build order remains.** If resuming this
+   project, there's no queued next phase - check with the owner for a new direction (a real
+   feature, a V2 item from `SCOPE.md §32`, ongoing maintenance, something else) rather than
+   assuming there's more scoped work waiting. Same stopping point PropertyManager's own session
+   reached once its scope doc was fully done.
+3. **Two small things worth keeping in mind for any future session touching this deployment**:
+   the SQL admin credentials/JWT secret/storage connection string all live only in local scratch
+   files (never committed) and Container Apps' own secret store - if those scratch files are
+   ever lost, the SQL password is recoverable via `az sql server update --admin-password`, but
+   the JWT secret and storage connection string are NOT recoverable from Azure directly (the
+   JWT secret was never stored anywhere else; the storage connection string CAN be regenerated
+   via `az storage account show-connection-string`, just not read back from Container Apps'
+   write-only secret store). Also: this dev machine's IP was whitelisted on the SQL server
+   firewall (`AllowMyMachine` rule) to run the schema setup - harmless to leave, but worth
+   knowing it's there if the owner ever audits firewall rules.
 4. **Patterns worth carrying into whatever's next**, confirmed repeatedly across the whole
    Phase-16/17 stretch: read the relevant `_service.py`/`_repository.py`/`_api.py` files FIRST,
    every time, before assuming a backend gap exists OR assuming one doesn't - the answer went

@@ -2479,3 +2479,117 @@ CORS wiring, the real Administrator account, the post-deployment checklist) is w
 `docs/DEPLOYMENT_GUIDE.md`'s "Execution order" section, each step marked to pause for explicit
 confirmation before it runs - not started yet, an open decision for the owner on how they want
 to proceed.
+
+## 2026-08-26 — Phase 20 finished: InspectIQ deployed to Azure and verified live, closing out the entire 20-phase build order
+
+Owner chose "go step by step" when asked how to proceed with real provisioning - every resource
+below was created only after an explicit go-ahead for that specific step, never as one
+unattended run. Full command-level detail lives in `docs/DEPLOYMENT_GUIDE.md`'s own "Execution
+order" section (each step now marked done with its actual outcome); this entry is the narrative
+of what actually happened and what was worth learning from it, not a duplicate of the command
+log.
+
+**Resource group `inspectiq-rg` (UK South) → Azure SQL (`inspectiq-sql-shmuelstern`,
+`InspectIQDb`) went first.** The plain `--use-free-limit` flag alone errored
+(`ProvisioningDisabled`) - needed the SLO spelled out explicitly
+(`--edition GeneralPurpose --family Gen5 --capacity 2 --compute-model Serverless`) alongside it,
+a detail PropertyManager's own notes hadn't captured this precisely. Schema deployed via
+`sqlcmd` (tables 01-08, constraints, indexes, roles, the seeded inspection template, and ONLY
+Part A of `13_SeedSampleData.sql` - the global risk matrix, extracted to a temp script - Part
+B's demo companies deliberately excluded). Verified with real row counts against the live DB,
+not "the script ran": 25 tables, 5 roles, 21 sections/102 questions, 4 risk levels, 3 triggers,
+22 CHECK constraints, and `Companies`/`Users`/`Properties` all genuinely 0.
+
+**ACR and the backend image came next.** `inspectiqacr` was already taken - Azure resource names
+for ACR/Storage are globally unique across EVERY Azure customer, not just this subscription,
+worth remembering before assuming a plain project-name will be available. Used
+`inspectiqacrshmuelstern` instead. `az acr build` genuinely built `backend/Dockerfile` for the
+first time (no local Docker daemon running on this machine) and it passed cleanly on the first
+try - the `msodbcsql18`/`libgssapi-krb5-2` fix ported from PropertyManager's own Dockerfile
+worked without modification. Hit the exact same cosmetic `az acr build` Windows-console
+`UnicodeEncodeError` PropertyManager's session hit (log streaming crashes, the build itself
+doesn't) - confirmed real success via `az acr task list-runs` instead of trusting the crashed
+stream, a second independent data point that this is a real, repeatable CLI quirk worth knowing
+about rather than a one-off.
+
+**Blob Storage hit two more first-time gotchas.** `inspectiqstorage` was ALSO already taken
+globally (used `inspectiqstorageshm`) - and `Microsoft.Storage` wasn't registered as a resource
+provider on this subscription yet, erroring with a confusing `SubscriptionNotFound` that had
+nothing to do with the actual subscription being missing - the same category of "fresh
+subscription needs a provider registered first" gotcha PropertyManager hit once with
+`Microsoft.ContainerRegistry`, now confirmed to recur with a different provider on a different
+project. `az provider register -n Microsoft.Storage` + a ~60s poll fixed it. Container created
+with `--public-access off` and confirmed `AllowBlobPublicAccess: False` at the account level too
+- both layers matter, not just the container-level setting.
+
+**Container Apps deployment worked end-to-end on the FIRST attempt - zero debugging rounds**,
+a genuinely different outcome from PropertyManager's own session, which needed three real
+debugging rounds (the TLS hang, the removed dependency, the missing `Encrypt=yes`) to get from
+"deployed" to "actually connected." The difference: all three fixes were built into
+`backend/Dockerfile`/`config.py` from the start this session (Phase 20's own repo-prep work,
+done before any provisioning began) instead of being rediscovered live against a real Azure SQL
+connection. `az containerapp create --registry-identity system` also auto-provisioned the
+Managed Identity + `AcrPull` role assignment in one step - PropertyManager's own session needed
+a separate manual role-assignment command, a real CLI capability improvement worth knowing about
+for next time. `GET /api/health` returned a genuine `{"status":"ok","database":"connected"}`
+against the real Azure SQL database on the very first request. Also explicitly wired liveness +
+readiness probes via `az containerapp update --yaml` with a minimal template patch (built the
+probe JSON from scratch rather than editing the full exported YAML, to avoid accidentally
+sending back read-only fields like `provisioningState`) - closing the exact gap PropertyManager's
+own Prompt 33 audit found and never got around to fixing (`probes: null` there, confirmed via
+that project's own memory before assuming this project needed the same fix).
+
+**Frontend deployment surfaced one real, transient false alarm, not a bug**: immediately after
+updating the Container App's `CORS_ALLOWED_ORIGINS` to the real Static Web Apps origin, the
+very first browser-side login attempt hit a genuine `CORS policy` error in the console. Rather
+than assume the CORS config was wrong, checked directly first: a `curl -X OPTIONS` preflight
+against the backend showed the correct `access-control-allow-origin` header already present -
+meaning the NEW Container Apps revision (with the updated env var) hadn't yet taken over 100% of
+traffic from the old one at the exact moment the browser's first request landed. A retry
+seconds later through the real UI succeeded cleanly, and the login response showed the actual
+backend's own "Incorrect email or password." message for a wrong-password attempt - the same
+combined CORS+CSP+backend+DB proof PropertyManager's own deployment used. **Worth a short
+deliberate pause after any `containerapp update` before trusting an immediate browser-side
+retry as the final verdict** - a genuinely new lesson, not one carried over from PropertyManager.
+
+**The real Administrator account and full post-deployment checklist closed out the phase.**
+Created via a one-off script connecting directly to the production DB and calling the app's own
+real `hash_password` (bcrypt) - same shape as PropertyManager's own first-admin script, adapted
+for InspectIQ's Company/User/UserRoles structure instead of a single Employees table. Verified
+via both a real `POST /api/auth/login` over HTTP and a real browser session reaching a genuinely
+working Dashboard.
+
+**The single most important NEW verification this deployment needed - proving Azure Blob
+Storage actually works, since PropertyManager never had file uploads to prove anything like it -
+was done for real, not assumed from the code reading alone.** Created a real Property (its 3
+auto-seeded CleaningAreas appeared correctly, confirming Phase 11's logic works identically in
+production) and started a real Inspection. Uploading a photo needed a genuinely new technique
+for this environment: this session's browser tooling can't drive a native OS file-picker dialog,
+so the upload was triggered by constructing a `File` object and a `DataTransfer` via
+`javascript_tool`, assigning it to the hidden `<input type="file">`, and dispatching a `change`
+event to fire React's own `onChange` handler - the same "native setter + dispatch" pattern
+Phase 16's own testing sessions already established for checkboxes, now confirmed to generalize
+to file inputs too. A misleading read of `input.files.length` returning `0` immediately after
+the first dispatch looked like a failure - it wasn't; the upload had already fired and React
+reset the input afterward (a common "allow reselecting the same file" pattern), confirmed by
+checking the real `MediaFiles` rows via the API rather than trusting the DOM's own post-dispatch
+state. The actual proof: downloaded the uploaded photo back via `GET /api/media/{id}/download`
+and confirmed the bytes matched the original exactly, byte for byte.
+
+**All verification data was cleaned up afterward, confirmed thoroughly, not just "deleted and
+moved on"**: the 2 test `MediaFiles` were removed via the real `DELETE /api/media/{id}` endpoint
+specifically so the underlying blobs would be removed too (not a direct DB delete, which would
+have orphaned real files in the storage account) - then independently confirmed via
+`az storage blob list` that the `media` container was genuinely empty, not just that the DB
+rows were gone. The test Inspection/102 responses/Property/CleaningAreas were removed via direct
+`sqlcmd` (hitting, and immediately recognizing, the same `ANSI_NULLS`/`QUOTED_IDENTIFIER`
+filtered-index gotcha documented since Phase 2 - `SET` them `ON` first, same as every other
+hand-written cleanup script in this project's history). Final production state confirmed by
+direct query: exactly 1 Company, 1 User (the real Administrator), 0 Properties, 0 MediaFiles.
+
+**This closes out Phase 20 and the entire original 20-phase build order.** InspectIQ is live at
+`https://brave-moss-06f7dda03.7.azurestaticapps.net` (frontend) and
+`https://inspectiq-api.orangesky-00064908.uksouth.azurecontainerapps.io` (backend). Nothing from
+`PROJECT_PLAN.md §11`'s scope remains - if a future session resumes this project, there is no
+queued next phase; ask the owner for a new direction rather than assuming one, the same stopping
+point PropertyManager's own session reached once its scope doc was fully done.
