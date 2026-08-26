@@ -290,7 +290,26 @@ Walk through live, through the actual browser against the real deployed URLs, no
    (`probes: null` there, confirmed live). Verified the update didn't break anything: probes
    confirmed present via `az containerapp show`, health check still returns 200 immediately
    after.
-6. Provision Static Web Apps + deploy the frontend (§5) — free tier.
-7. Wire CORS back to the real frontend URL (§6).
+6. ~~Provision Static Web Apps + deploy the frontend~~ — **done, 2026-08-26**: `inspectiq-web`
+   (West Europe, Free tier). `frontend/.env.production` updated with the real backend URLs
+   (`VITE_API_BASE_URL`/`VITE_API_ORIGIN` pointing at the live Container App) — confirmed the
+   CSP `<meta>` tag substituted correctly in the real `dist/index.html` before deploying, not
+   assumed. Deployed via `npx @azure/static-web-apps-cli deploy` with the site's own deployment
+   token (manual, not GitHub Actions, same as PropertyManager). Live at
+   `https://brave-moss-06f7dda03.7.azurestaticapps.net`.
+7. ~~Wire CORS back to the real frontend URL~~ — **done, 2026-08-26**: updated the Container
+   App's `CORS_ALLOWED_ORIGINS` to the real Static Web Apps origin. **Verified live through the
+   actual UI, the same check PropertyManager's deployment used**: direct navigation to
+   `/properties` while logged out correctly resolves to the app instead of 404ing (confirms
+   `staticwebapp.config.json`'s SPA fallback works in the real deployed environment, not just
+   locally), and a deliberate wrong-password login attempt returned the real backend's own
+   "Incorrect email or password." message — proof CORS + CSP + backend + DB all work together,
+   not just individually. One transient false alarm during this check, worth noting for next
+   time: the very first attempt (seconds after the CORS env var update) genuinely failed with a
+   real browser CORS error before the new Container Apps revision had fully taken over traffic —
+   re-confirmed via a direct `curl -X OPTIONS` preflight that the backend's CORS response was
+   already correct by then, and a retry a few seconds later through the real UI succeeded
+   cleanly. Not a bug, just revision-rollout propagation lag - worth a short pause after any
+   `containerapp update` before trusting an immediate browser-side retry.
 8. Create the real Administrator account (§16).
 9. Full post-deployment checklist (§16), live through the browser.
