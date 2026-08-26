@@ -203,9 +203,17 @@ def submit_inspection(db: Session, current_user: User, inspection_id: int) -> In
             f"Cannot submit: {len(unanswered)} mandatory question(s) not yet answered ({preview})."
         )
 
+    # The Status=='Submitted' check above is a fast, friendly early-exit for the ordinary
+    # sequential case - it is NOT what makes double-submission safe. The actual guarantee is
+    # this atomic conditional UPDATE (repo.submit_inspection_if_in_progress): two submit
+    # requests genuinely in flight at once can both pass the check above (both still see
+    # InProgress), but only one of them can win the UPDATE...WHERE Status != 'Submitted' - SQL
+    # Server's row lock forces the second to wait, then re-evaluate against the now-committed
+    # row and affect zero rows. Found by a real concurrent-thread test, not by inspection - see
+    # docs/AI_MEMORY.md's Phase 18 entry.
     now = datetime.now(timezone.utc)
-    inspection.Status = "Submitted"
-    inspection.SubmittedAt = now
-    inspection.CompletedAt = now
+    if not repo.submit_inspection_if_in_progress(db, inspection_id, submitted_at=now):
+        raise ConflictError("Inspection has already been submitted.")
 
-    return repo.save_inspection(db, inspection)
+    db.refresh(inspection)
+    return inspection

@@ -4,7 +4,9 @@ Inspections has no CompanyId column of its own (same situation as Units, docs/DA
 §9.5) - every isolation-sensitive query joins through Properties and filters on
 Properties.CompanyId.
 """
-from sqlalchemy import func, select
+from datetime import datetime
+
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.inspection import Inspection
@@ -63,3 +65,25 @@ def save_inspection(db: Session, inspection: Inspection) -> Inspection:
     db.commit()
     db.refresh(inspection)
     return inspection
+
+
+def submit_inspection_if_in_progress(db: Session, inspection_id: int, *, submitted_at: datetime) -> bool:
+    """Atomically transitions Status -> Submitted, but only if it isn't already Submitted - the
+    WHERE clause makes the check-and-set one statement instead of the ORM's usual read-then-write
+    (load the object, check .Status in Python, mutate it, commit later). That read-then-write gap
+    is a real TOCTOU race, not a hypothetical one: two submit requests genuinely in flight at the
+    same time can both read Status=='InProgress' before either commits, and both succeed - caught
+    by Phase 18's adversarial concurrency test firing real concurrent threads at the endpoint,
+    where the plain sequential "submit twice" test (test_inspections.py) couldn't have found it.
+    SQL Server takes a row lock for the UPDATE's duration regardless of isolation level, so the
+    second concurrent UPDATE blocks until the first commits, then re-evaluates the WHERE clause
+    against the now-committed row and legitimately affects 0 rows - returns False in that case.
+    Returns True only for whichever call actually won the race.
+    """
+    result = db.execute(
+        update(Inspection)
+        .where(Inspection.InspectionId == inspection_id, Inspection.Status != "Submitted")
+        .values(Status="Submitted", SubmittedAt=submitted_at, CompletedAt=submitted_at)
+    )
+    db.commit()
+    return result.rowcount == 1

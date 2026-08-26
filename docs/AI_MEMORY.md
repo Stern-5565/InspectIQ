@@ -2187,3 +2187,93 @@ adversarial testing pass across every module, scope §19), Phase 19 (an explicit
 cross-company security audit, scope §20 - isolation has been spot-checked live in nearly every
 module's own session already, but no single consolidated pass exists), and Phase 20
 (deployment). No specific next phase has been chosen - an open decision for a future session.
+
+## 2026-08-26 — Phase 18 (adversarial testing) built and verified: a real concurrency bug found by firing actual concurrent threads, not by reading the code
+
+Owner picked Phase 18 explicitly when asked (over Phase 19/20) at the start of this session.
+`SCOPE.md` itself has no literal numbered "testing checklist" - `PROJECT_PLAN.md`/
+`backend_prompt.md` both cite "scope §19" for testing, but §19 in `SCOPE.md` is actually Risk
+Assessments (a pre-existing mislabel carried through this project's own docs since Phase 1,
+not corrected here - fixing doc cross-references wasn't in scope for this session). Treated the
+phase as "go find attack surface no individual module's test file was built to look for,"
+deliberately not re-testing what the existing 155 tests already cover per-module.
+
+New `backend/tests/test_adversarial.py`, 33 tests across six categories: JWT forgery (a
+correctly-signed-but-tampered token, one crafted with an already-past `exp` rather than waiting
+out the real 30 minutes, the classic `alg: none` downgrade attack, five malformed
+`Authorization` header shapes, and the access-token-used-at-refresh-endpoint direction that
+`test_auth.py` hadn't covered - only the reverse direction existed); mass-assignment attempts
+(POSTing `CompanyId`/`RiskScore`/`Status` fields that don't exist on their Create/Update
+schemas, proven ignored live over real HTTP, not just by reading the schema files); an IDOR
+sweep (a single nonexistent ID - `999999999` - hit against 10 different detail endpoints in one
+parametrized test, all clean 404s, plus negative and non-numeric path IDs); injection-style
+payloads (a `' OR '1'='1` search string and a `DROP TABLE` string, both inert - parameterized
+queries hold, and the properties table is confirmed still queryable afterward - plus a
+`<script>` tag stored and returned completely verbatim, proving the API doesn't try to sanitize
+stored content, which is correctly the frontend's job via React's default escaping); upload
+abuse (an oversized image against the existing 15MB `MEDIA_MAX_IMAGE_SIZE_BYTES` limit, which
+had real code since Phase 9 but literally zero test coverage before this - confirmed rejected
+422 with no orphaned DB row or disk file either; a zero-byte file, confirmed non-crashing); and
+pagination bounds (`page=0`, negative, `page_size` over 100).
+
+**Two real lessons about writing this file, not about the app**: first, three early tests failed
+not on an app bug but because their own cleanup `finally` blocks used the wrong delete order for
+FK'd child rows - `MaintenanceUpdates` before `MaintenanceIssues` (a general-edit PATCH writes a
+timeline entry too, not just a status change), `CleaningAreas` before `Properties` (the Phase 11
+auto-seed-on-create). Both patterns were already established in `test_maintenance.py`/
+`test_properties.py`'s own cleanup helpers - a fresh test file just hadn't learned them yet.
+Second, and worse: the *first* such failure's uncaught `IntegrityError` left that test's shared
+`db_session` fixture in a rolled-back-pending state, which silently broke the SAME fixture's own
+`delete_user` teardown immediately afterward - one root cause cascaded into roughly twenty
+unrelated-looking `ERROR`s (duplicate-email `IntegrityError`s) on every later test sharing that
+fixture, because the poisoned session outlived the failing test. Worth remembering: when a whole
+file full of tests fails together right after one specific test, check whether they share a
+long-lived fixture before assuming twenty separate bugs exist. (A third bug was just a plain
+typo - `PropertyType: "Residential"` isn't a valid enum value, it's `"ResidentialHouse"` per
+`app/schemas/enums.py` - caught immediately by a live 422, not silently accepted.)
+
+**One real bug found in the application itself: a genuine TOCTOU race in
+`inspection_service.submit_inspection`.** The existing `test_submitting_twice_returns_409`
+(Phase 8) only proves the *sequential* case - submit, wait for the response, submit again. It
+says nothing about two requests genuinely in flight at the same moment. A new test fires 5 real
+Python threads at the submit endpoint of the same in-progress inspection simultaneously (same
+`TestClient`, but each request opens its own real DB session/transaction against SQL Server, so
+this is genuine DB-level concurrency, not a simulation). Before any fix, this reproducibly
+returned **two 200s**, not one: the old code loaded the `Inspection` row via the ORM, checked
+`.Status == "Submitted"` in Python, did the mandatory-question check, and only THEN set
+`Status = "Submitted"` and called `db.commit()` - a real window where two concurrent requests
+could both read `"InProgress"` before either one's write landed.
+
+Fixed by replacing that ORM read-then-write with a single atomic conditional UPDATE - new
+`inspection_repository.submit_inspection_if_in_progress(db, inspection_id, submitted_at=...)`
+issues `UPDATE Inspections SET Status='Submitted', ... WHERE InspectionId=? AND Status !=
+'Submitted'` and returns whether its own call actually affected a row. SQL Server holds a row
+lock for the UPDATE statement's duration regardless of transaction isolation level, so a second
+concurrent UPDATE against the same row blocks until the first commits, then re-evaluates the
+`WHERE` clause against the now-committed value and legitimately affects zero rows - a real
+compare-and-swap, not a convention anyone has to remember to follow correctly, the same
+"structural, not conventional" principle this project already applied to `RiskScore`'s
+`PERSISTED` computed column and the soft-delete `INSTEAD OF DELETE` triggers.
+`inspection_service.submit_inspection` keeps its existing early `Status == "Submitted"` check as
+a fast, friendly early-exit for the ordinary sequential case (a nicer error path, not what makes
+double-submission actually safe), then raises the same `ConflictError` if the atomic update
+reports it lost the race.
+
+**Verified fixed two different ways, not just re-run until green once**: the new pytest thread
+test passed cleanly across 20+ repeated runs (not one lucky timing win), AND - following this
+project's own standing "pytest passing alone is not proof, a real running server must confirm
+it too" discipline (first established in Phase 5, reconfirmed in Phase 9/14/17) - a real
+standalone `uvicorn` process was started and hit with 8 genuinely concurrent `httpx` requests
+over actual HTTP from a separate one-off script, producing `results: [409, 409, 409, 409, 409,
+409, 409, 200]` - exactly one winner, confirmed independently of the in-process test harness.
+All 188 backend tests (155 original + 33 new) pass; the real `InspectIQDb` was confirmed clean
+of every leftover test row (users, properties, maintenance issues, the live-verification
+inspection) after the full run.
+
+**This closes out Phase 18.** Per `PROJECT_PLAN.md §11`, what remains is Phase 19 (an explicit,
+dedicated cross-company security audit, scope §20 - isolation has been spot-checked live in
+nearly every module's own session, and Phase 18's IDOR sweep added one systematic pass across 10
+endpoints, but no single dedicated audit document exists yet) and Phase 20 (deployment). No
+specific next phase has been chosen - an open decision for a future session, per this project's
+own standing rule of stopping for review at every phase gate rather than running unattended into
+the next one.

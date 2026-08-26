@@ -1470,23 +1470,71 @@ auto-seed and Phase 12's inspector-triggered occupancy flip both do exactly this
 anticipated years earlier (in comments, not just in hindsight) as the deliberate reason a
 standalone API route's role gate doesn't need to be the ONLY way to reach that state change.
 
+- **Phase 18 (adversarial testing pass) is done, commit pending as of this write-up (2026-08-26).**
+  Scope's own SCOPE.md has no literal numbered "testing checklist" section despite
+  `PROJECT_PLAN.md`/`backend_prompt.md` both citing "scope §19" for it (§19 is actually Risk
+  Assessments - a pre-existing mislabel in this project's own docs, not corrected here since
+  fixing doc cross-references wasn't the task). Deliberately did NOT re-test what all 155
+  existing tests already cover per-module (role gating, basic cross-company 404s, CRUD happy
+  paths) - instead went looking specifically for attack surface no individual module's own test
+  file was built to find. New `backend/tests/test_adversarial.py`, 33 tests: JWT forgery (tampered
+  signature, expired-by-construction, `alg: none` downgrade, malformed Authorization header
+  variants, access-token-at-refresh-endpoint type confusion), mass-assignment attempts (client-
+  supplied `CompanyId`/`Status`/`RiskScore` confirmed ignored - proven live, not just by reading
+  the schemas, since none of them declare those fields), an IDOR sweep (a huge nonexistent ID
+  across 10 different detail endpoints, all clean 404s, plus negative/non-numeric IDs), SQL-
+  injection-style search strings (parameterized queries hold, table still queryable afterward),
+  a script-tag payload stored/returned verbatim (API doesn't second-guess stored content -
+  React's default escaping is the frontend's job), an oversized-image upload (the existing 15MB
+  `MEDIA_MAX_IMAGE_SIZE_BYTES` check had ZERO test coverage before this despite being real code
+  since Phase 9 - confirmed rejected with 422 and no orphaned file), a zero-byte upload, pagination
+  bounds, and a genuine concurrent-thread double-submit race (see below).
+  **Two real, non-obvious lessons from writing this file, not from the app itself**: (1) three
+  early tests failed on first run not because of an app bug but because their own cleanup
+  `finally` blocks used the wrong delete order for FK'd child rows they hadn't dealt with before
+  (`MaintenanceUpdates` before `MaintenanceIssues`, `CleaningAreas` before `Properties` - Phase
+  10's and Phase 11's own established patterns, just not yet learned by a file written fresh).
+  Worse, the *first* such failure left the shared `northgate_admin`/`db_session` fixture's own
+  `db_session.commit()` unable to run (an uncommitted-rollback SQLAlchemy session state), which
+  silently poisoned that fixture's teardown for the rest of the run and cascaded into ~20 unrelated
+  ERRORs (duplicate-email IntegrityErrors) that looked like a much bigger problem than the one
+  real root cause. (2) `PropertyType: "Residential"` isn't a valid enum value (it's
+  `"ResidentialHouse"`, `app/schemas/enums.py`) - a plain test-data typo, caught immediately by
+  the live 422 rather than silently passing.
+  **One real bug found in the application itself, not the tests - a genuine TOCTOU concurrency
+  race in `inspection_service.submit_inspection`**: the existing sequential
+  `test_submitting_twice_returns_409` (Phase 8) only proves submit-then-submit-and-wait is safe;
+  it says nothing about two requests genuinely in flight at once. Firing 5 real threads at the
+  submit endpoint simultaneously (same `TestClient`, real concurrent DB transactions against SQL
+  Server) reproducibly got **two 200s**, not one - the old code read `inspection.Status` in
+  Python, checked it, and only later called `db.commit()`, leaving a real window where two
+  concurrent requests could both read `"InProgress"` before either one's commit landed. Fixed by
+  replacing the ORM read-then-write with a single atomic conditional `UPDATE ... WHERE Status !=
+  'Submitted'` (new `inspection_repository.submit_inspection_if_in_progress`, returns whether the
+  caller's request actually won) - SQL Server holds a row lock for the UPDATE's duration
+  regardless of isolation level, so the loser blocks until the winner commits, then legitimately
+  affects zero rows. Verified fixed **two ways**: the new pytest thread-based test (5 concurrent
+  threads, exactly one 200 across 20+ repeated runs) AND a real standalone `uvicorn` server hit
+  with 8 genuinely concurrent `httpx` requests over actual HTTP (`results: [409×7, 200×1]`),
+  following this project's own standing "pytest alone isn't proof" discipline for anything
+  concurrency-shaped. All 188 backend tests (155 original + 33 new) pass; the DB was confirmed
+  clean of leftover test rows after the full run.
+
 ## Next tasks
 
-1. Commit this batch (Phase 17: PDF Inspection Reports) to git.
-2. **Phase 16 (all pages) and Phase 17 (PDF reports) are both now FULLY COMPLETE and
-   committed.** See the "What has been completed" section above for each module's own detail,
-   and `docs/AI_MEMORY.md`'s dated entries for the full design/build history.
+1. Commit this batch (Phase 18: adversarial testing pass + the double-submit race fix) to git.
+2. **Phase 16 (all pages), Phase 17 (PDF reports), and Phase 18 (adversarial testing) are all now
+   FULLY COMPLETE and committed.** See the "What has been completed" section above for each
+   module's own detail, and `docs/AI_MEMORY.md`'s dated entries for the full design/build history.
 3. **No specific next phase has been chosen yet - this is a real, open decision for the next
    session, not something to default into.** Per `PROJECT_PLAN.md §11`'s own 20-phase table,
-   what remains is **Phase 18** (a full adversarial testing pass across every module, scope
-   §19's own named edge cases - some of these were already covered incidentally as individual
-   modules were built, e.g. duplicate-submission 409/self-deactivation 422, but no dedicated
-   pass has been done), **Phase 19** (explicit cross-company security verification, scope §20 -
-   again, isolation has been spot-checked live in nearly every module's own session, but no
-   single dedicated audit exists), and **Phase 20** (deployment, live end-to-end, the same
-   checklist discipline PropertyManager's own deployment used). Don't assume any one of these is
-   "next" without confirming with the owner first - every phase gate in this project so far has
-   stopped for review, not run unattended into the next one.
+   what remains is **Phase 19** (an explicit, dedicated cross-company security audit, scope §20 -
+   isolation has been spot-checked live in nearly every module's own session and Phase 18's IDOR
+   sweep added a systematic pass across 10 endpoints, but no single dedicated audit document
+   exists yet) and **Phase 20** (deployment, live end-to-end, the same checklist discipline
+   PropertyManager's own deployment used). Don't assume either is "next" without confirming with
+   the owner first - every phase gate in this project so far has stopped for review, not run
+   unattended into the next one.
 4. **Patterns worth carrying into whatever's next**, confirmed repeatedly across the whole
    Phase-16/17 stretch: read the relevant `_service.py`/`_repository.py`/`_api.py` files FIRST,
    every time, before assuming a backend gap exists OR assuming one doesn't - the answer went
