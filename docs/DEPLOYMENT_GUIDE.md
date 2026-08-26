@@ -30,7 +30,7 @@ subscription — `pm-*`/`propertymanager-*`):
 
 - Resource group: `inspectiq-rg`
 - SQL server: `inspectiq-sql-shmuelstern`, database `InspectIQDb`
-- Container Registry: `inspectiqacr` (must be globally unique, alphanumeric only)
+- Container Registry: `inspectiqacrshmuelstern` (must be globally unique, alphanumeric only)
 - Container Apps environment: `inspectiq-env`, app `inspectiq-api`
 - Storage account: `inspectiqstorage` (globally unique, lowercase alphanumeric, 3–24 chars),
   container `media`
@@ -58,15 +58,15 @@ subscription — `pm-*`/`propertymanager-*`):
 
 ## 3. Backend deployment
 
-1. `az acr create --resource-group inspectiq-rg --name inspectiqacr --sku Basic`
-2. `az acr build --registry inspectiqacr --image inspectiq-backend:v1 backend/` — remote build,
+1. `az acr create --resource-group inspectiq-rg --name inspectiqacrshmuelstern --sku Basic`
+2. `az acr build --registry inspectiqacrshmuelstern --image inspectiq-backend:v1 backend/` — remote build,
    no local Docker needed (confirmed working for PropertyManager's identical Dockerfile
    pattern). `backend/Dockerfile` already exists (Phase 20 repo-prep, done) — bakes in the
    `msodbcsql18`/`libgssapi-krb5-2` fix from the start rather than rediscovering it live the way
    PropertyManager's session had to.
 3. `az containerapp env create --name inspectiq-env --resource-group inspectiq-rg --location uksouth`
 4. `az containerapp create` with:
-   - System-assigned Managed Identity + `AcrPull` role on `inspectiqacr` (no shared registry
+   - System-assigned Managed Identity + `AcrPull` role on `inspectiqacrshmuelstern` (no shared registry
      login, same as PropertyManager).
    - Secrets (Container Apps' own encrypted secret store): `db-password`,
      `jwt-secret-key` (fresh, `python -c "import secrets; print(secrets.token_urlsafe(64))"`),
@@ -254,7 +254,20 @@ Walk through live, through the actual browser against the real deployed URLs, no
    against the live Azure DB, not just "the script ran"**: 25 tables, 5 roles, 1 template/21
    sections/102 questions, 4 risk matrix levels, 3 triggers, 22 CHECK constraints — and
    `Companies`/`Users`/`Properties` all genuinely 0, confirming no demo data leaked in.
-3. Provision ACR + build/push the backend image (§3.1–3.2) — first paid resource (~$5/month).
+3. ~~Provision ACR + build/push the backend image~~ — **done, 2026-08-26**: `inspectiqacrshmuelstern`
+   was already taken globally (ACR names are global across all Azure customers, not just this
+   subscription) — used `inspectiqacrshmuelstern` instead, same naming-collision pattern the
+   SQL server name already accounted for. Admin user left disabled (secure default — Container
+   Apps will use a Managed Identity + `AcrPull` role in step 5, not a shared login). `az acr
+   build --registry inspectiqacrshmuelstern --image inspectiq-backend:v1 backend/` — **the
+   Dockerfile's first real build test, and it passed end-to-end** (ODBC Driver 18 install,
+   `apt-mark manual libgssapi-krb5-2`, `pip install` including the new `azure-storage-blob`
+   dependency). Hit the exact same `az acr build` tooling gotcha PropertyManager's session did:
+   the local log-streaming crashes with a `UnicodeEncodeError` (Windows console `cp1252`
+   choking on a Unicode character in the build log) that looks like a build failure but isn't —
+   confirmed the real status via `az acr task list-runs` (polled until `Succeeded`, ~3 minutes)
+   instead of trusting the crashed stream, then confirmed the image tag actually exists via
+   `az acr repository show-tags`.
 4. Provision the storage account + container (§4) — pennies/month.
 5. Provision Container Apps environment + the backend app itself (§3.3–3.5) — $0 at this traffic.
 6. Provision Static Web Apps + deploy the frontend (§5) — free tier.
